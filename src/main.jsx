@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Activity, Brain, Download, Mic, MicOff, PauseCircle, Radio, Sparkles, Timer, Users } from 'lucide-react';
+import { Activity, BarChart3, Brain, Download, FileText, Mic, MicOff, PauseCircle, Radio, Server, Sparkles, Timer, Upload, Users } from 'lucide-react';
+import { BENCHMARK_PRESETS, benchmarkTranscript, formatPercent, summarizeBenchmarkCases } from './benchmark.js';
 import './styles.css';
 
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const SpeechRecognition = typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition : null;
 
 const RMS_SMOOTHING = 0.82;
 const PAUSE_MS = 700;
@@ -312,6 +313,157 @@ function StatCard({ icon: Icon, label, value, detail }) {
   );
 }
 
+
+function BenchmarkLab({ segments }) {
+  const presetSummary = useMemo(() => summarizeBenchmarkCases(), []);
+  const liveTranscript = useMemo(() => segments.map((segment) => segment.text).join(' '), [segments]);
+  const [reference, setReference] = useState(BENCHMARK_PRESETS[0].reference);
+  const [hypothesis, setHypothesis] = useState(BENCHMARK_PRESETS[0].hypothesis);
+  const [durationSeconds, setDurationSeconds] = useState(BENCHMARK_PRESETS[0].durationSeconds);
+  const [processingSeconds, setProcessingSeconds] = useState(BENCHMARK_PRESETS[0].durationSeconds);
+  const [referenceSegments, setReferenceSegments] = useState(BENCHMARK_PRESETS[0].referenceSegments);
+  const [hypothesisSegments, setHypothesisSegments] = useState(BENCHMARK_PRESETS[0].hypothesisSegments);
+  const [backendUrl, setBackendUrl] = useState('http://127.0.0.1:8787');
+  const [audioFile, setAudioFile] = useState(null);
+  const [backendStatus, setBackendStatus] = useState('');
+  const [isBackendBusy, setIsBackendBusy] = useState(false);
+
+  const metrics = useMemo(
+    () => benchmarkTranscript({ reference, hypothesis, audioDurationSeconds: durationSeconds, processingSeconds, referenceSegments, hypothesisSegments }),
+    [durationSeconds, hypothesis, hypothesisSegments, processingSeconds, reference, referenceSegments],
+  );
+
+  const loadPreset = (preset) => {
+    setReference(preset.reference);
+    setHypothesis(preset.hypothesis);
+    setDurationSeconds(preset.durationSeconds);
+    setProcessingSeconds(preset.processingSeconds ?? preset.durationSeconds);
+    setReferenceSegments(preset.referenceSegments ?? []);
+    setHypothesisSegments(preset.hypothesisSegments ?? []);
+    setBackendStatus('');
+  };
+
+  const useLiveTranscript = () => {
+    setHypothesis(liveTranscript);
+    setHypothesisSegments(segments);
+    setProcessingSeconds(Math.max(0.1, durationSeconds));
+  };
+
+  const sendAudioToBackend = async () => {
+    if (!audioFile) return;
+    setIsBackendBusy(true);
+    setBackendStatus('Sending audio to backend model…');
+
+    try {
+      const startedAt = performance.now();
+      const response = await fetch(`${backendUrl.replace(/\/$/, '')}/api/transcribe-diarize`, {
+        method: 'POST',
+        headers: { 'Content-Type': audioFile.type || 'application/octet-stream' },
+        body: audioFile,
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error || 'Backend diarization failed.');
+      }
+
+      setHypothesis(payload.text || payload.segments?.map((segment) => segment.text).join(' ') || '');
+      setHypothesisSegments(payload.segments ?? []);
+      setProcessingSeconds(payload.processingSeconds ?? (performance.now() - startedAt) / 1000);
+      setBackendStatus(`Backend returned ${payload.segments?.length ?? 0} diarized segments via ${payload.provider ?? 'configured model'}.`);
+    } catch (error) {
+      setBackendStatus(error.message);
+    } finally {
+      setIsBackendBusy(false);
+    }
+  };
+
+  return (
+    <section className="benchmark-panel" aria-labelledby="benchmark-heading">
+      <div className="panel-heading benchmark-heading-row">
+        <div><BarChart3 size={20} /> <span id="benchmark-heading">STT benchmark lab</span></div>
+        <span>WER / CER / RTF scoring</span>
+      </div>
+
+      <div className="benchmark-intro">
+        <FileText size={28} />
+        <p>
+          Evaluate the browser transcript the same way speech-recognition systems are commonly reported: compare a ground-truth reference to a hypothesis and track word error rate, character error rate, edit counts, and real-time factor.
+        </p>
+      </div>
+
+      <div className="preset-row">
+        {BENCHMARK_PRESETS.map((preset) => (
+          <button key={preset.id} className="chip" type="button" onClick={() => loadPreset(preset)}>
+            {preset.name}
+          </button>
+        ))}
+        <button className="chip" type="button" onClick={useLiveTranscript} disabled={!liveTranscript}>
+          Use live transcript
+        </button>
+      </div>
+
+      <div className="benchmark-grid">
+        <label>
+          Reference transcript
+          <textarea value={reference} onChange={(event) => setReference(event.target.value)} rows="5" />
+        </label>
+        <label>
+          Hypothesis transcript
+          <textarea value={hypothesis} onChange={(event) => setHypothesis(event.target.value)} rows="5" />
+        </label>
+      </div>
+
+      <div className="benchmark-timing">
+        <label>
+          Audio duration (seconds)
+          <input type="number" min="0" step="0.1" value={durationSeconds} onChange={(event) => setDurationSeconds(Number(event.target.value))} />
+        </label>
+        <label>
+          Processing / wall time (seconds)
+          <input type="number" min="0" step="0.1" value={processingSeconds} onChange={(event) => setProcessingSeconds(Number(event.target.value))} />
+        </label>
+      </div>
+
+      <div className="backend-card">
+        <div className="backend-card-copy">
+          <Server size={22} />
+          <div>
+            <strong>True diarization backend</strong>
+            <p>Upload audio to the Node backend, which can call WhisperX + pyannote (or another configured command) and return speaker-attributed segments instead of using the browser heuristic.</p>
+          </div>
+        </div>
+        <div className="backend-controls">
+          <label>
+            Backend URL
+            <input type="url" value={backendUrl} onChange={(event) => setBackendUrl(event.target.value)} />
+          </label>
+          <label>
+            Audio file
+            <input type="file" accept="audio/*" onChange={(event) => setAudioFile(event.target.files?.[0] ?? null)} />
+          </label>
+          <button className="secondary" type="button" onClick={sendAudioToBackend} disabled={!audioFile || isBackendBusy}>
+            <Upload size={18} /> {isBackendBusy ? 'Running backend…' : 'Run backend diarization'}
+          </button>
+        </div>
+        {backendStatus && <div className="backend-status">{backendStatus}</div>}
+      </div>
+
+      <div className="benchmark-results">
+        <StatCard icon={BarChart3} label="Word error rate" value={formatPercent(metrics.wer)} detail={`${metrics.wordEdits.substitutions} sub · ${metrics.wordEdits.insertions} ins · ${metrics.wordEdits.deletions} del`} />
+        <StatCard icon={FileText} label="Character error rate" value={formatPercent(metrics.cer)} detail={`${metrics.characterEdits.distance} character edits`} />
+        <StatCard icon={Brain} label="Word accuracy" value={formatPercent(Math.max(0, metrics.accuracy))} detail={`${metrics.referenceWordCount} reference words`} />
+        <StatCard icon={Timer} label="Real-time factor" value={metrics.realTimeFactor === null ? 'n/a' : metrics.realTimeFactor.toFixed(2)} detail="lower than 1.0 is faster than audio" />
+        <StatCard icon={Users} label="Diarization error" value={formatPercent(metrics.diarization.der)} detail={`${Math.round(metrics.diarization.speakerConfusionMs)}ms speaker confusion`} />
+      </div>
+
+      <div className="benchmark-baseline">
+        Built-in fixture baseline: {formatPercent(presetSummary.averageWer)} average WER and {formatPercent(presetSummary.averageDer)} average DER over {presetSummary.totalReferenceWords} reference words. Use a labeled audio corpus and paste the Web Speech API output here for real quality comparisons across browsers, microphones, noise levels, and languages.
+      </div>
+    </section>
+  );
+}
+
 function App() {
   const [language, setLanguage] = useState('en-US');
   const [continuous, setContinuous] = useState(true);
@@ -329,7 +481,7 @@ function App() {
           <div className="eyebrow"><Sparkles size={18} /> Roma AI realtime speech lab</div>
           <h1>Ultra-low-latency voice recognition with live transcription, pauses, and speaker turns.</h1>
           <p>
-            Capture microphone audio, stream interim speech-to-text, split turns after pauses, and label likely speakers with a lightweight acoustic heuristic designed to keep the browser fast.
+            Capture microphone audio, stream interim speech-to-text, split turns after pauses, and benchmark output against a backend path that can run true diarization models.
           </p>
           <div className="actions">
             <button className="primary" onClick={engine.isListening ? engine.stop : engine.start} disabled={engine.isStarting}>
@@ -382,6 +534,8 @@ function App() {
         <StatCard icon={Brain} label="Words captured" value={words} detail="final transcript words" />
       </section>
 
+      <BenchmarkLab segments={engine.segments} />
+
       <section className="workspace">
         <div className="transcript-panel">
           <div className="panel-heading">
@@ -416,7 +570,7 @@ function App() {
             <li>Native browser STT avoids shipping heavy models to the client.</li>
             <li>512-sample audio analysis keeps voice activity detection responsive.</li>
             <li>Pause segmentation runs in requestAnimationFrame with smoothed RMS energy.</li>
-            <li>Speaker labels are separated by turn timing and energy profile, with room to replace the heuristic with server-side diarization.</li>
+            <li>For true diarization, run the backend with WhisperX + pyannote and upload audio in the benchmark lab.</li>
           </ul>
         </aside>
       </section>
