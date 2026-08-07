@@ -1,0 +1,19 @@
+{
+  "scenarioId": "wearer_spoken_assistance",
+  "version": 1,
+  "family": "wearer",
+  "description": "With the shipped glasses defaults, a genuinely useful proactive suggestion is SPOKEN into the wearer's earpiece rather than silently displayed — and it waits for a real conversational gap rather than talking over anyone.",
+  "environment": { "roomProfile": "quiet_office", "visualTier": "deterministic_geometric" },
+  "people": [
+    { "simulationId": "sim_wearer", "voice": "aura:aura-2-thalia-en", "position": { "x": 0, "y": 0, "z": 0.4 } },
+    { "simulationId": "sim_contractor", "voice": "aura:aura-2-orion-en", "position": { "x": 1.5, "y": 0, "z": 2 } }
+  ],
+  "events": [
+    { "action": "ui.click", "control": "start" },
+    { "action": "person.speak", "person": "sim_contractor", "text": "So the whole job will run you about eight hundred dollars, and I can start on Monday.", "addressedToRoma": false, "groundTruth": "a price quoted to the wearer with no mention of what it includes — a classic coaching opportunity" },
+    { "action": "wait_for", "condition": "roma.segment_finalized", "timeoutMs": 30000 },
+    { "action": "wait_for", "condition": "roma.turn_classified", "param": "addressed_to=wearer", "timeoutMs": 45000 },
+    { "action": "wait", "ms": 20000, "note": "let the batched Opportunity Engine evaluate and the gap detector find the quiet" },
+    { "action": "assert", "condition": "roma.no_console_errors" }
+  ]
+}

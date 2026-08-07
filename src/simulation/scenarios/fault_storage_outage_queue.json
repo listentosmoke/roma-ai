@@ -1,0 +1,20 @@
+{
+  "scenarioId": "fault_storage_outage_queue",
+  "version": 1,
+  "family": "faults",
+  "description": "Durable-storage routes blocked while a spoken memory is extracted: the mutation queue holds the write visibly pending, then recovers to acknowledged exactly-once after the fault clears.",
+  "environment": { "roomProfile": "quiet_office", "visualTier": "deterministic_geometric" },
+  "people": [
+    { "simulationId": "sim_orion", "voice": "aura:aura-2-orion-en", "position": { "x": 0.5, "y": 0, "z": 1 } }
+  ],
+  "events": [
+    { "action": "ui.click", "control": "start" },
+    { "action": "fault.trigger", "fault": "data_api_block" },
+    { "action": "person.speak", "person": "sim_orion", "text": "Roma, remember that the workshop inspection is on Thursday.", "addressedToRoma": true },
+    { "action": "wait_for", "condition": "roma.memory_written", "timeoutMs": 45000 },
+    { "action": "wait_for", "condition": "roma.queue_pending", "timeoutMs": 20000 },
+    { "action": "fault.clear", "fault": "data_api_block" },
+    { "action": "wait_for", "condition": "roma.queue_recovered", "timeoutMs": 60000 },
+    { "action": "assert", "condition": "roma.no_console_errors" }
+  ]
+}

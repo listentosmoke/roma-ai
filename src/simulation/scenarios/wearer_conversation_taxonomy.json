@@ -1,0 +1,29 @@
+{
+  "scenarioId": "wearer_conversation_taxonomy",
+  "version": 1,
+  "family": "wearer",
+  "description": "Roma distinguishes the kinds of speech around the glasses: two other people talking to each other, someone addressing the wearer, and a direct request to Roma — each classified differently, with speech only for the last.",
+  "environment": { "roomProfile": "meeting_3p", "visualTier": "deterministic_geometric" },
+  "people": [
+    { "simulationId": "sim_wearer", "voice": "aura:aura-2-thalia-en", "position": { "x": 0, "y": 0, "z": 0.4 } },
+    { "simulationId": "sim_matt", "voice": "aura:aura-2-orion-en", "position": { "x": 2, "y": 0, "z": 2.5 } }
+  ],
+  "events": [
+    { "action": "ui.click", "control": "start" },
+
+    { "action": "person.speak", "person": "sim_matt", "text": "Alex, did you get a chance to look at the roof drawings this morning?", "addressedToRoma": false, "groundTruth": "one coworker addressing another, not the wearer" },
+    { "action": "wait_for", "condition": "roma.segment_finalized", "timeoutMs": 30000 },
+    { "action": "wait", "ms": 8000 },
+    { "action": "assert", "condition": "roma.no_response", "message": "Roma never answers on behalf of people talking to each other" },
+
+    { "action": "person.speak", "person": "sim_matt", "text": "And what did you think of the new schedule?", "addressedToRoma": false, "groundTruth": "now aimed at the wearer" },
+    { "action": "wait_for", "condition": "roma.segment_finalized", "timeoutMs": 30000 },
+    { "action": "wait", "ms": 8000 },
+    { "action": "assert", "condition": "roma.no_response", "message": "still the wearer's conversation to have" },
+
+    { "action": "person.speak", "person": "sim_wearer", "text": "Roma, what time is it right now?", "addressedToRoma": true },
+    { "action": "wait_for", "condition": "roma.turn_classified", "param": "addressed_to=roma", "timeoutMs": 45000 },
+    { "action": "wait_for", "condition": "roma.playback_started", "timeoutMs": 30000 },
+    { "action": "assert", "condition": "roma.no_console_errors" }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "scenarioId": "fault_audio_dropout_camera_freeze",
+  "version": 1,
+  "family": "faults",
+  "description": "A real signal dropout mutes the microphone mid-session and speech afterwards still transcribes; freezing the renderer stops frame advancement while voice interaction continues (camera failure never breaks voice).",
+  "environment": { "roomProfile": "quiet_office", "visualTier": "deterministic_geometric" },
+  "people": [
+    { "simulationId": "sim_orion", "voice": "aura:aura-2-orion-en", "position": { "x": 0.5, "y": 0, "z": 1 } }
+  ],
+  "events": [
+    { "action": "ui.click", "control": "camera" },
+    { "action": "wait_for", "condition": "roma.detection_ran", "timeoutMs": 90000 },
+    { "action": "ui.click", "control": "start" },
+    { "action": "fault.trigger", "fault": "audio_dropout", "durationMs": 1500 },
+    { "action": "wait", "ms": 1800 },
+    { "action": "fault.trigger", "fault": "camera_freeze" },
+    { "action": "wait", "ms": 1200 },
+    { "action": "assert", "condition": "sim.frames_advancing", "negate": true, "timeoutMs": 1500, "message": "frozen camera stops advancing frames" },
+    { "action": "person.speak", "person": "sim_orion", "text": "Roma, what time is it?", "addressedToRoma": true },
+    { "action": "wait_for", "condition": "roma.decision_respond", "timeoutMs": 40000 },
+    { "action": "fault.clear", "fault": "camera_freeze" },
+    { "action": "assert", "condition": "roma.no_console_errors" }
+  ]
+}

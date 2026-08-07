@@ -1,0 +1,21 @@
+{
+  "scenarioId": "echo_suppression_closed_loop",
+  "version": 1,
+  "family": "room",
+  "description": "Roma's REAL decoded playback is mixed back into the virtual microphone (loud, delayed, reverberant room) and must be suppressed after the full mic->Deepgram round trip — no self-response loop.",
+  "environment": { "roomProfile": "echoing_room", "visualTier": "deterministic_geometric" },
+  "people": [
+    { "simulationId": "sim_orion", "voice": "aura:aura-2-orion-en", "position": { "x": 0.5, "y": 0, "z": 2 } }
+  ],
+  "events": [
+    { "action": "ui.click", "control": "start" },
+    { "action": "echo.configure", "enabled": true, "gain": 0.6, "delayMs": 200, "lowpassHz": 4500 },
+    { "action": "person.speak", "person": "sim_orion", "text": "Roma, what time is it at the moment?", "addressedToRoma": true },
+    { "action": "wait_for", "condition": "roma.playback_started", "timeoutMs": 40000 },
+    { "action": "wait_for", "condition": "roma.playback_completed", "timeoutMs": 30000 },
+    { "action": "wait_for", "condition": "roma.echo_suppressed", "timeoutMs": 25000 },
+    { "action": "wait", "ms": 6000 },
+    { "action": "assert", "condition": "roma.no_echo_response", "message": "the echoed answer must not become a new turn" },
+    { "action": "assert", "condition": "roma.no_console_errors" }
+  ]
+}

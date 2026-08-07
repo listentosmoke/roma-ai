@@ -1,0 +1,26 @@
+{
+  "scenarioId": "direct_address_and_followup",
+  "version": 1,
+  "family": "room",
+  "description": "Ambient speech is ignored; a direct address is answered aloud; a follow-up WITHOUT the wake name rides the engagement window.",
+  "environment": { "roomProfile": "quiet_office", "visualTier": "deterministic_geometric" },
+  "people": [
+    { "simulationId": "sim_vanessa", "voice": "fixture:vanessa", "position": { "x": -1.5, "y": 0, "z": 2 } },
+    { "simulationId": "sim_orion", "voice": "aura:aura-2-orion-en", "position": { "x": 1, "y": 0, "z": 1 } }
+  ],
+  "events": [
+    { "action": "ui.click", "control": "start" },
+    { "action": "person.speak", "person": "sim_vanessa", "text": "(recorded conversation clip — not addressed to Roma)", "addressedToRoma": false },
+    { "action": "wait_for", "condition": "roma.segment_finalized", "timeoutMs": 30000 },
+    { "action": "wait", "ms": 6000, "note": "settle window for the agent decision" },
+    { "action": "assert", "condition": "roma.no_response", "message": "ambient recorded conversation must not trigger a reply" },
+    { "action": "person.speak", "person": "sim_orion", "text": "Roma, what time is it right now?", "addressedToRoma": true },
+    { "action": "wait_for", "condition": "roma.decision_respond", "timeoutMs": 30000 },
+    { "action": "wait_for", "condition": "roma.playback_started", "timeoutMs": 25000 },
+    { "action": "wait_for", "condition": "roma.playback_completed", "timeoutMs": 30000 },
+    { "action": "assert", "condition": "roma.engagement_active", "message": "answering opens the engagement window" },
+    { "action": "person.speak", "person": "sim_orion", "text": "And could you tell me that time once more?", "addressedToRoma": true },
+    { "action": "wait_for", "condition": "roma.decision_respond", "timeoutMs": 30000 },
+    { "action": "assert", "condition": "roma.no_console_errors" }
+  ]
+}

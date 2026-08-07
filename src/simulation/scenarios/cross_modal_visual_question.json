@@ -1,0 +1,21 @@
+{
+  "scenarioId": "cross_modal_visual_question",
+  "version": 1,
+  "family": "inspector",
+  "description": "Cross-modal timing: an object is visible before a spoken visual question (real speech -> real detection -> real agent with the compact scene snapshot); the object is then removed and the scene updates before any later question.",
+  "environment": { "roomProfile": "visual_question_room", "visualTier": "recognition_compatible" },
+  "people": [
+    { "simulationId": "sim_orion", "voice": "aura:aura-2-orion-en", "position": { "x": 0.5, "y": 0, "z": 1 } }
+  ],
+  "events": [
+    { "action": "object.add", "object": "sign1", "kind": "stop sign", "x": 700, "y": 320, "width": 220 },
+    { "action": "ui.click", "control": "camera" },
+    { "action": "wait_for", "condition": "roma.scene_object_visible", "param": "stop sign", "timeoutMs": 60000 },
+    { "action": "ui.click", "control": "start" },
+    { "action": "person.speak", "person": "sim_orion", "text": "Roma, what objects can you see right now?", "addressedToRoma": true },
+    { "action": "wait_for", "condition": "roma.decision_respond", "timeoutMs": 45000 },
+    { "action": "object.remove", "object": "sign1" },
+    { "action": "wait_for", "condition": "roma.scene_object_missing", "param": "stop sign", "timeoutMs": 30000 },
+    { "action": "assert", "condition": "roma.no_console_errors" }
+  ]
+}

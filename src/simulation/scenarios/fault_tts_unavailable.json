@@ -1,0 +1,23 @@
+{
+  "scenarioId": "fault_tts_unavailable",
+  "version": 1,
+  "family": "faults",
+  "description": "TTS route blocked at the real network boundary: the agent still answers and the gate still authorizes, but synthesis fails visibly and nothing plays; after clearing the fault the next answer plays normally.",
+  "environment": { "roomProfile": "quiet_office", "visualTier": "deterministic_geometric" },
+  "people": [
+    { "simulationId": "sim_orion", "voice": "aura:aura-2-orion-en", "position": { "x": 0.5, "y": 0, "z": 1 } }
+  ],
+  "events": [
+    { "action": "ui.click", "control": "start" },
+    { "action": "fault.trigger", "fault": "tts_block" },
+    { "action": "person.speak", "person": "sim_orion", "text": "Roma, what time is it?", "addressedToRoma": true },
+    { "action": "wait_for", "condition": "roma.decision_respond", "timeoutMs": 40000 },
+    { "action": "assert", "condition": "roma.speech_authorized", "scope": "scenarioStart", "timeoutMs": 15000, "message": "the gate still authorizes even though synthesis will fail" },
+    { "action": "wait", "ms": 8000 },
+    { "action": "assert", "condition": "roma.playback_started", "negate": true, "scope": "scenarioStart", "message": "no audio can play while TTS is unreachable" },
+    { "action": "fault.clear", "fault": "tts_block" },
+    { "action": "person.speak", "person": "sim_orion", "text": "Roma, could you tell me the time once more, please?", "addressedToRoma": true },
+    { "action": "wait_for", "condition": "roma.decision_respond", "timeoutMs": 40000 },
+    { "action": "wait_for", "condition": "roma.playback_started", "timeoutMs": 60000 }
+  ]
+}

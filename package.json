@@ -3,21 +3,46 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "node --test",
-    "benchmark": "node scripts/benchmark.mjs",
-    "backend": "node backend/server.mjs",
-    "dev:full": "npm run backend & vite --host 0.0.0.0"
+    "preflight": "node scripts/preflight.mjs",
+    "test": "node --test test/*.test.js",
+    "transcribe:file": "node scripts/transcribe-file.mjs",
+    "stream:test": "node scripts/stream.mjs",
+    "simulate": "node scripts/simulate.mjs",
+    "simulate:agent": "node scripts/simulate-agent.mjs",
+    "simulate:vision-agent": "node scripts/simulate-vision-agent.mjs",
+    "simulate:proactive-agent": "node scripts/simulate-proactive.mjs",
+    "simulate:selective-voice": "node scripts/simulate-selective-voice.mjs",
+    "simulate:live-conversation": "node scripts/simulate-live-conversation.mjs",
+    "simulate:memory": "node scripts/simulate-memory.mjs",
+    "simulate:identity": "node scripts/simulate-identity.mjs",
+    "simulate:voice-identity": "node scripts/simulate-voice-identity.mjs",
+    "simulate:server-state": "node scripts/simulate-server-state.mjs",
+    "simulate:recovery": "node scripts/simulate-recovery.mjs",
+    "simulate:virtual-hardware": "node scripts/simulate-virtual-hardware.mjs",
+    "simulate:virtual-room": "node scripts/run-virtual-scenarios.mjs --family room",
+    "simulate:virtual-faults": "node scripts/run-virtual-scenarios.mjs --family faults",
+    "simulate:virtual-memory": "node scripts/run-virtual-scenarios.mjs --family memory",
+    "simulate:virtual-identity": "node scripts/run-virtual-scenarios.mjs --family identity",
+    "simulate:virtual-inspector": "node scripts/run-virtual-scenarios.mjs --family inspector",
+    "explore:virtual-boundaries": "node scripts/explore-simulation-boundaries.mjs",
+    "verify:virtual-lab": "node scripts/verify-virtual-lab.mjs",
+    "verify:qwen-worker": "node scripts/verify-qwen-worker.mjs",
+    "test:vision-live": "node scripts/test-vision-live.mjs",
+    "test:tts-live": "node scripts/test-tts-live.mjs"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
-    "vite": "latest",
+    "@huggingface/transformers": "^4.2.0",
+    "lucide-react": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "lucide-react": "latest"
-  },
-  "devDependencies": {}
+    "vite": "latest",
+    "ws": "^8.21.0"
+  }
 }

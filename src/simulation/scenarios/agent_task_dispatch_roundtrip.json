@@ -1,0 +1,20 @@
+{
+  "scenarioId": "agent_task_dispatch_roundtrip",
+  "version": 1,
+  "family": "agent_env",
+  "description": "The wearer asks Roma out loud to do engineering work. Roma dispatches it to the background server agent (mock worker) instead of attempting it inline, stays quiet while the worker makes progress, and speaks only when the task needs the wearer or finishes.",
+  "environment": { "roomProfile": "quiet_office", "visualTier": "deterministic_geometric" },
+  "people": [
+    { "simulationId": "sim_wearer", "voice": "aura:aura-2-thalia-en", "position": { "x": 0, "y": 0, "z": 0.4 } }
+  ],
+  "events": [
+    { "action": "project.register", "name": "roma", "testCmd": "node --test" },
+    { "action": "ui.click", "control": "start" },
+    { "action": "person.speak", "person": "sim_wearer", "text": "Roma, run the test suite on the roma project in the background and tell me how it goes.", "addressedToRoma": true },
+    { "action": "wait_for", "condition": "roma.turn_classified", "param": "addressed_to=roma", "timeoutMs": 60000 },
+    { "action": "wait_for", "condition": "roma.task_dispatched", "timeoutMs": 45000 },
+    { "action": "wait_for", "condition": "roma.task_completed", "timeoutMs": 60000 },
+    { "action": "assert", "condition": "roma.no_progress_chatter", "scope": "scenarioStart", "message": "background progress must not become chatter in the wearer's ear" },
+    { "action": "assert", "condition": "roma.no_console_errors" }
+  ]
+}
