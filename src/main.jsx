@@ -1005,6 +1005,9 @@ function App() {
     // bounded pending list so a spoken approval resolves to the right task.
     serverTasks: agentTasks.toolApi,
     pendingTasks: agentTasks.pendingTasks,
+    // What the background agent can be pointed at. Without this Roma decides
+    // she has no access to any codebase and apologises instead of dispatching.
+    registeredProjects: agentTasks.registeredProjects,
   });
   const [copied, setCopied] = useState(false);
   const [harnessLog, setHarnessLog] = useState([]);

@@ -8,10 +8,10 @@ design docs it links are accurate as of the same date.
 
 | Check | Result |
 |---|---|
-| Offline tests | **681/681 pass** (56 files, ~3 s, `npm test`) |
+| Offline tests | **683/683 pass** (56 files, ~3 s, `npm test`) |
 | Deterministic simulations | **11/11 pass** (see §10) |
 | Virtual-hardware lab | **13/13 scenarios pass** closed-loop through real Deepgram/Groq/gate/TTS/COCO-SSD on virtual `MediaStream` devices, + 17-check smoke (`verify:virtual-lab`; see [VIRTUAL-HARDWARE.md](VIRTUAL-HARDWARE.md)) |
-| Wearer + dispatch round-trip | **5/5 assertions, 3/3 consecutive runs** — spoken request → `dispatch_server_task` → mock worker → completion, with no progress chatter (`agent_task_dispatch_roundtrip`) |
+| Wearer + dispatch round-trip | **5/5 assertions** with the mock worker (`agent_task_dispatch_roundtrip`, 3/3 consecutive) AND with the REAL Qwen CLI (`dispatch_real_qwen_smoke`, 2/2) — spoken request → classification → dispatch → completion, no progress chatter |
 | Real Qwen Code worker | **15/15 checks** live, both modes, on `qwen3-coder-plus` with its own configured credential (`verify:qwen-worker -- --write`, 2026-08-06; see [AGENT-ENV.md](AGENT-ENV.md)) |
 | Production build | ✓ Vite 8.0.16 — ~465 kB JS (~145 kB gzip); simulation code and worker internals proven absent from the bundle |
 | Bundle secret scan | ✓ no key values, no `node:sqlite`, no DB paths, no dev headers, no simulation markers, no worker/CLI strings |
@@ -217,12 +217,12 @@ and `selectWorker()` forces the mock in any test run whatever `.env` says.
 
 ## 10. Test and simulation inventory (verified 2026-08-05)
 
-**Offline: 681 tests, 56 files, all passing.** Families: engine/audio,
+**Offline: 683 tests, 56 files, all passing.** Families: engine/audio,
 inspector/compiler, agent (schema/runtime/tools/provider/vision), wearer +
 direct-address, proactive, voice (units/delivery/integration/security/
 live-voice), memory (8 files), identity (9), server (13), policy,
 voice-identity, sync-reliability (21), simulation (schema/lab), agent-env (18),
-task-notifier (13), qwen-worker (34).
+task-notifier (15), qwen-worker (34).
 
 **Simulations (registered in package.json):**
 

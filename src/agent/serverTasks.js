@@ -17,7 +17,12 @@ export function registerServerTaskTools(registry, { tasks }) {
 
   registry.register({
     name: 'dispatch_server_task',
-    description: 'Hand a substantial engineering job to the background server agent — reading or changing a codebase, running tests, database work, debugging, or anything that will take minutes. Give the goal in one clear sentence, and the project name if the user named one. Use "write" mode ONLY when the user clearly wants files changed; the wearer is asked to approve before anything is modified. Do not use this for questions you can already answer.',
+    // The old wording ended "do not use this for questions you can already
+    // answer", which the model read too broadly: asked what a source file was
+    // for, it decided that was an ordinary question, found it had no file
+    // access, and apologised instead of dispatching. YOU CANNOT READ FILES is
+    // the fact that settles it.
+    description: 'Hand engineering work to the background server agent, which CAN read files and run commands inside a registered project. You cannot read files or run anything yourself, so ANY request that needs looking at code, running tests, database work, or debugging must come here — including "what does this file do" and other questions that sound small. Give the goal in one clear sentence and the project name. Use "write" mode ONLY when the user clearly wants files changed; the wearer is asked to approve before anything is modified. Never answer from guesswork about code you have not been shown.',
     inputSchema: {
       type: 'object',
       properties: { goal: { type: 'string' }, project: { type: 'string' }, mode: { type: 'string' } },
@@ -90,6 +95,20 @@ export function registerServerTaskTools(registry, { tasks }) {
  * there is nothing outstanding — Roma is not reminded of work it need not
  * mention.
  */
+/**
+ * Render the registered-project allowlist for context assembly.
+ *
+ * Without this Roma has no idea any project exists. Asked to look at "the roma
+ * project" she concluded she had no access to it and apologised — technically
+ * true of herself, but wrong, because a background agent was standing by with
+ * that exact repository registered. Naming what is dispatchable is what makes
+ * the capability usable.
+ */
+export function formatRegisteredProjects(projects = []) {
+  if (!projects.length) return '';
+  return projects.slice(0, 10).map((project) => `- ${project.name}${project.defaultTestCmd ? ` (tests: ${project.defaultTestCmd})` : ''}`).join('\n');
+}
+
 export function formatPendingTasks(tasks = []) {
   const waiting = tasks.filter((task) => task.status === 'awaiting_approval' || task.status === 'awaiting_input');
   if (!waiting.length) return '';

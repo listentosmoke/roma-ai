@@ -24,6 +24,10 @@ export function useAgentTasks({ speech, speechGate, getPreferences } = {}) {
   const [worker, setWorker] = useState(null);
   const [error, setError] = useState(null);
   const tasksRef = useRef([]);
+  // The project allowlist. Roma needs to know these exist, or she reasons that
+  // she has no access to any codebase and declines instead of dispatching.
+  const projectsRef = useRef([]);
+  const [projects, setProjects] = useState([]);
 
   const record = useCallback((event) => {
     setEvents((existing) => [...existing, { ...event, at: Date.now() }].slice(-MAX_EVENTS));
@@ -98,6 +102,11 @@ export function useAgentTasks({ speech, speechGate, getPreferences } = {}) {
   useEffect(() => {
     let cancelled = false;
     client.get('/api/agent-tasks/health').then((health) => { if (!cancelled) setWorker(health.worker ?? null); }).catch(() => {});
+    client.get('/api/agent-projects').then((response) => {
+      if (cancelled) return;
+      projectsRef.current = response.projects ?? [];
+      setProjects(projectsRef.current);
+    }).catch(() => {});
     const timer = setInterval(() => {
       if (cancelled) return;
       refreshRef.current?.();
@@ -147,8 +156,11 @@ export function useAgentTasks({ speech, speechGate, getPreferences } = {}) {
     recentTasks,
     events,
     worker,
+    projects,
     error,
     toolApi,
+    /** Bounded read-only context: what the background agent may be pointed at. */
+    registeredProjects: () => projectsRef.current,
     /** Bounded read-only context for the agent prompt (tasks blocked on the wearer). */
     pendingTasks: () => tasksRef.current.filter((task) => task.status === 'awaiting_approval' || task.status === 'awaiting_input'),
     refresh,

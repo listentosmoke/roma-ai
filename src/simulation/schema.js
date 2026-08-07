@@ -164,6 +164,10 @@ export function validateScenario(raw) {
   if (!raw || typeof raw !== 'object') return { ok: false, errors: ['scenario is not an object'] };
   if (typeof raw.scenarioId !== 'string' || !/^[a-z0-9_]{3,64}$/.test(raw.scenarioId)) errors.push('scenarioId must be 3-64 chars of [a-z0-9_]');
   if (raw.version !== undefined && typeof raw.version !== 'number') errors.push('version must be a number');
+  // Which background worker engine the run needs. `mock` is the default and
+  // the only value that costs nothing; `qwen` marks a scenario as opt-in
+  // because it spawns a real coding agent and spends real tokens.
+  if (raw.worker !== undefined && !['mock', 'qwen'].includes(raw.worker)) errors.push('worker must be "mock" or "qwen"');
   const env = raw.environment ?? {};
   if (env.roomProfile && !ROOM_PROFILES.includes(env.roomProfile)) errors.push(`unknown roomProfile "${env.roomProfile}"`);
   if (env.visualTier && !VISUAL_TIERS.includes(env.visualTier)) errors.push(`unknown visualTier "${env.visualTier}"`);

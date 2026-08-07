@@ -24,6 +24,9 @@ const scenarioName = argValue('--scenario');
 const filePath = argValue('--file');
 const headless = !args.includes('--visible');
 const shared = args.includes('--shared');
+// Scenarios declaring `worker: "qwen"` drive a REAL coding agent and spend real
+// tokens, so they are skipped unless asked for by name or with --real-worker.
+const allowRealWorker = args.includes('--real-worker') || Boolean(scenarioName) || Boolean(filePath);
 
 const env = loadServerEnv();
 if (!env.deepgramApiKey || !env.groqApiKey) {
@@ -40,6 +43,10 @@ function loadScenarios() {
       const scenario = JSON.parse(readFileSync(join(SCENARIO_DIR, file), 'utf8'));
       if (scenarioName && scenario.scenarioId !== scenarioName) continue;
       if (family && scenario.family !== family) continue;
+      if (scenario.worker === 'qwen' && !allowRealWorker) {
+        console.log(`  (skipping ${scenario.scenarioId} — needs the real worker; pass --real-worker or --scenario ${scenario.scenarioId})`);
+        continue;
+      }
       scenarios.push(scenario);
     }
   }
@@ -63,7 +70,11 @@ const summaries = [];
 for (const scenario of scenarios) {
   console.log(`\n▶ ${scenario.scenarioId} — ${scenario.description ?? ''}`);
   try {
-    lab ??= await createLab({ headless, seed: scenario.seed ?? 1 });
+    // A real-worker scenario needs its own lab: the engine is fixed when the
+    // isolated server starts, so it can never be shared with a mock run.
+    const needsWorker = scenario.worker === 'qwen' ? 'qwen' : 'mock';
+    if (lab && lab.worker !== needsWorker) { await lab.close().catch(() => {}); lab = null; }
+    lab ??= await createLab({ headless, seed: scenario.seed ?? 1, worker: needsWorker });
     const result = await runScenario(lab, scenario);
     const reports = writeReports(result);
     summaries.push({ scenarioId: scenario.scenarioId, passed: result.passed, report: reports.markdown });

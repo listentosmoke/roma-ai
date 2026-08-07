@@ -28,9 +28,9 @@ const FAULT_URL_PATTERNS = {
   data_api_block: ['*api/data/*', '*api/session*', '*api/consent*'],
 };
 
-export async function createLab({ headless = true, seed = 1, log = (line) => console.log(line), keepBrowserOpen = false } = {}) {
-  const server = await startIsolatedServer({});
-  log(`  [lab] isolated server ${server.baseUrl} (db: disposable, tenant: ${server.workspaceId})`);
+export async function createLab({ headless = true, seed = 1, log = (line) => console.log(line), keepBrowserOpen = false, worker = 'mock' } = {}) {
+  const server = await startIsolatedServer({ worker });
+  log(`  [lab] isolated server ${server.baseUrl} (db: disposable, tenant: ${server.workspaceId}, worker: ${worker})`);
   const chrome = await launchChrome({ headless });
   const cdp = await connectPage(chrome.port);
   await cdp.injectOnNewDocument(`window.__ROMA_SIMULATION__ = { seed: ${Number(seed)}, cameraFps: 12 };`);
@@ -114,6 +114,8 @@ export async function createLab({ headless = true, seed = 1, log = (line) => con
     server,
     chrome,
     cdp,
+    /** Which worker engine this lab's server was started with; fixed for its lifetime. */
+    worker,
     snapshot,
     ui,
     speak,

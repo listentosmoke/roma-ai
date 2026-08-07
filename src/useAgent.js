@@ -21,7 +21,7 @@ import { agentConfig } from './agent/config.js';
 const MAX_EVENTS = 100; // each turn now also emits an addressee-decision event
 const MAX_ERRORS = 10;
 
-export function useAgent({ sceneStore, frameBuffer, deepAnalyzer, speechGate, getPreferences, speech, memory, identity, principal, onAssistOpportunity, serverTasks, pendingTasks } = {}) {
+export function useAgent({ sceneStore, frameBuffer, deepAnalyzer, speechGate, getPreferences, speech, memory, identity, principal, onAssistOpportunity, serverTasks, pendingTasks, registeredProjects } = {}) {
   const [thinking, setThinking] = useState(false);
   const [events, setEvents] = useState([]);
   const [lastTurn, setLastTurn] = useState(null);
@@ -45,6 +45,8 @@ export function useAgent({ sceneStore, frameBuffer, deepAnalyzer, speechGate, ge
   useEffect(() => { serverTasksRef.current = serverTasks ?? null; }, [serverTasks]);
   const pendingTasksRef = useRef(pendingTasks ?? null);
   useEffect(() => { pendingTasksRef.current = pendingTasks ?? null; }, [pendingTasks]);
+  const registeredProjectsRef = useRef(registeredProjects ?? null);
+  useEffect(() => { registeredProjectsRef.current = registeredProjects ?? null; }, [registeredProjects]);
 
   const runtime = useMemo(() => {
     // Proxies dereference the ref's CURRENT value on every call, so tools keep
@@ -113,6 +115,7 @@ export function useAgent({ sceneStore, frameBuffer, deepAnalyzer, speechGate, ge
       // Intervention Policy and Speech Gate still decide everything.
       onAssistOpportunity: (hint) => assistListenerRef.current?.(hint),
       pendingTasks: () => pendingTasksRef.current?.() ?? [],
+      registeredProjects: () => registeredProjectsRef.current?.() ?? [],
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

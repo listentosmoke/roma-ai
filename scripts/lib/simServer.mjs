@@ -11,7 +11,7 @@ import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-export async function startIsolatedServer({ port = 0, log = () => {} } = {}) {
+export async function startIsolatedServer({ port = 0, log = () => {}, worker = 'mock' } = {}) {
   const workDir = mkdtempSync(join(tmpdir(), 'roma-lab-run-'));
   const dbPath = join(workDir, 'lab.db');
   const runId = `lab_${Date.now().toString(36)}_${randomBytes(3).toString('hex')}`;
@@ -25,6 +25,12 @@ export async function startIsolatedServer({ port = 0, log = () => {} } = {}) {
     BIOMETRIC_ENCRYPTION_KEY_VERSION: '1',
     DEV_PRINCIPAL_USER_ID: `${runId}_user`,
     DEV_PRINCIPAL_WORKSPACE_ID: `${runId}_workspace`,
+    // ALWAYS explicit, never inherited. A developer with AGENT_WORKER=qwen in
+    // their .env would otherwise have every lab scenario silently spawn real
+    // coding-agent processes and spend real tokens — the same trap that once
+    // turned `npm test` into a paid run. Scenarios opt in by declaring
+    // `worker: "qwen"`, and nothing else can turn it on.
+    AGENT_WORKER: worker === 'qwen' ? 'qwen' : 'mock',
   };
 
   const child = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--port', String(chosenPort), '--strictPort', '--host', '127.0.0.1'], {

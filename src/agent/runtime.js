@@ -123,6 +123,10 @@ export function createAgentRuntime({
   // src/agent/serverTasks.js). Read-only context; dispatch/approval happen
   // through tools, never through this.
   pendingTasks = () => [],
+  // Live getter for the project allowlist. Roma cannot read files; this is the
+  // list of places a background agent can, so she knows what is dispatchable
+  // instead of concluding she has no access.
+  registeredProjects = () => [],
 } = {}) {
   // ── legacy state (unchanged behaviour) ──────────────────────────────────────
   const history = []; // [{ role, speaker?, content, at }] — text only, no scene data
@@ -307,6 +311,7 @@ export function createAgentRuntime({
       // bounded, read-only list so a spoken "yes, go ahead" resolves to the
       // right task. Dispatch and approval happen through tools, never here.
       pendingTasks: typeof pendingTasks === 'function' ? (pendingTasks() ?? []) : [],
+      registeredProjects: typeof registeredProjects === 'function' ? (registeredProjects() ?? []) : [],
       // Deterministic engagement signal — informs the model only; it does not
       // override the model's ignore/respond/clarify judgment (engagement.js).
       engagementActive: engagement.isActive(at),

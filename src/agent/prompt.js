@@ -8,7 +8,7 @@
 
 import { formatAge } from '../clock.js';
 import { formatWearerContext } from './wearer.js';
-import { formatPendingTasks } from './serverTasks.js';
+import { formatPendingTasks, formatRegisteredProjects } from './serverTasks.js';
 
 export const SYSTEM_PROMPT = `You are Roma, an assistant that runs on a pair of \
 glasses worn by ONE person — the wearer. Their microphone, camera, and \
@@ -266,6 +266,7 @@ export function assembleContext({
   wearer = null,
   correctionNote = null,
   pendingTasks = [],
+  registeredProjects = [],
   at = Date.now(),
 }) {
   const memoriesBlock = formatMemories(relevantMemories);
@@ -292,6 +293,11 @@ export function assembleContext({
     // genuinely waiting, so a spoken "yes, go ahead" resolves to the right
     // task via answer_task_question.
     ...(formatPendingTasks(pendingTasks) ? ['', 'BACKGROUND TASKS WAITING ON THE WEARER (use answer_task_question with the task id when they reply):', formatPendingTasks(pendingTasks)] : []),
+    // What the background agent can actually be pointed at. Roma cannot read
+    // files; these are the projects where something else can, on her behalf.
+    ...(formatRegisteredProjects(registeredProjects)
+      ? ['', 'PROJECTS THE BACKGROUND AGENT CAN WORK IN (dispatch_server_task with the project name — you cannot read these files yourself):', formatRegisteredProjects(registeredProjects)]
+      : []),
     '',
     'RECENT TOOL RESULTS:',
     formatToolResults(toolResults),

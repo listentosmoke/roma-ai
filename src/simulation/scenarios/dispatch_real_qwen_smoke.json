@@ -1,0 +1,21 @@
+{
+  "scenarioId": "dispatch_real_qwen_smoke",
+  "version": 1,
+  "family": "agent_env",
+  "worker": "qwen",
+  "description": "The whole path end to end with nothing scripted: the wearer speaks aloud through a virtual microphone, real Deepgram transcribes it, the real Groq agent classifies the turn as addressed to Roma, Roma dispatches the work to the REAL Qwen Code CLI in the server process, stays quiet while it works, and speaks only when it finishes. Readonly mode, so the worker can inspect this repository but cannot change it. Opt-in: this spends real tokens on a real coding agent.",
+  "environment": { "roomProfile": "quiet_office", "visualTier": "deterministic_geometric" },
+  "people": [
+    { "simulationId": "sim_wearer", "voice": "aura:aura-2-thalia-en", "position": { "x": 0, "y": 0, "z": 0.4 } }
+  ],
+  "events": [
+    { "action": "project.register", "name": "roma", "testCmd": "npm test" },
+    { "action": "ui.click", "control": "start" },
+    { "action": "person.speak", "person": "sim_wearer", "text": "Roma, in the background, read source clock dot J S in the roma project and tell me what it is for.", "addressedToRoma": true },
+    { "action": "wait_for", "condition": "roma.turn_classified", "param": "addressed_to=roma", "timeoutMs": 60000 },
+    { "action": "wait_for", "condition": "roma.task_dispatched", "timeoutMs": 60000 },
+    { "action": "wait_for", "condition": "roma.task_completed", "timeoutMs": 120000 },
+    { "action": "assert", "condition": "roma.no_progress_chatter", "scope": "scenarioStart", "message": "background progress must not become chatter in the wearer's ear" },
+    { "action": "assert", "condition": "roma.no_console_errors" }
+  ]
+}

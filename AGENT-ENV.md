@@ -241,19 +241,63 @@ block, so approval is a normal part of the conversation rather than a UI chore.
 npm test                       # includes 34 protocol tests + 18 agent-env tests
 npm run verify:qwen-worker     # live, opt-in: real CLI, readonly only
 npm run verify:qwen-worker -- --write   # also verifies write mode
+
+# Spoken end-to-end, through the virtual microphone (needs Deepgram + Groq keys):
+node scripts/run-virtual-scenarios.mjs --family agent_env               # mock worker
+node scripts/run-virtual-scenarios.mjs --family agent_env --real-worker # …and the real one
 ```
+
+A lab scenario declares `"worker": "qwen"` to opt into the real engine. The
+isolated lab server always sets `AGENT_WORKER` **explicitly** rather than
+inheriting it, so a developer with `AGENT_WORKER=qwen` in `.env` does not
+silently turn every scenario into a paid run; real-worker scenarios are skipped
+unless named or run with `--real-worker`.
+
+### Making it usable in a real session
+
+Projects are an allowlist, so a fresh install can dispatch nothing. Register
+this repository and seed what is already known about it with:
+
+```bash
+node scripts/seed-engineering-memory.mjs --dry-run   # review first
+node scripts/seed-engineering-memory.mjs
+```
+
+Re-running is safe — entries are matched by title and skipped if present.
 
 The live script reads the same configuration the server does, builds a
 throwaway git repo in the OS temp directory and an in-memory database, and never
 touches `data/roma.db`, the real project, or the user's Qwen configuration. It
 costs real tokens, which is why it is opt-in and not part of `npm test`.
 
-Last measured, 2026-08-06 with `AGENT_WORKER=qwen` and a configured
+Last measured, 2026-08-07 with `AGENT_WORKER=qwen` and a configured
 `AGENT_WORKER_API_KEY`: **15/15 checks**, both modes, on `qwen3-coder-plus`.
 The readonly task found a planted bug with six tools and no file changes;
 learnings landed in engineering memory and nothing landed in personal memory;
 the write task asked first, produced a correct fix as a patch, left the working
 tree clean, and left no worktree behind.
+
+`dispatch_real_qwen_smoke` closes the loop end to end, with nothing scripted:
+the wearer speaks aloud, real Deepgram transcribes, the real Groq agent
+classifies the turn as addressed to Roma, she dispatches to the real CLI and
+answers *"I've started a background task to read src/clock.js in the roma
+project and will let you know when it's done"* — an acknowledgement, not a
+fabricated result — the task completes, and no progress becomes chatter.
+
+### What that scenario caught
+
+The first run failed, and usefully. Roma classified the turn correctly and then
+said *"I'm sorry, but I don't have access to the source code of the Roma
+project."* True of herself — she cannot read files — but wrong overall, because
+a background agent was standing by with that exact repository registered. She
+had never been told any project existed.
+
+Two fixes, both structural rather than prompt-tuning: the context now names the
+registered projects (`formatRegisteredProjects`, wired through
+`useAgentTasks` → `useAgent` → runtime → prompt), and the dispatch tool's
+description now states plainly that Roma cannot read files, so questions that
+sound small — *"what does this file do"* — route to the worker instead of being
+answered from guesswork. Root paths stay out of the prompt; only names go in.
 
 ## Known limits
 

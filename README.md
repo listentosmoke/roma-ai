@@ -120,7 +120,7 @@ untrusted users as-is.
 ## Tests, simulations, build
 
 ```bash
-npm test                  # full offline suite (681 tests, ~3s, no network/keys)
+npm test                  # full offline suite (683 tests, ~3s, no network/keys)
 npm run build             # production bundle (dist/)
 npm run preflight         # server-side startup health check
 
@@ -154,6 +154,8 @@ npm run simulate:virtual-identity   # spoken naming/continuity
 npm run simulate:virtual-inspector  # rendered scenes → real COCO-SSD
 npm run explore:virtual-boundaries  # parameter sweeps (gain/distance/noise)
 npm run verify:virtual-lab          # full gauntlet incl. build-exclusion proof
+node scripts/run-virtual-scenarios.mjs --family agent_env --real-worker
+                                    # spoken dispatch through the REAL Qwen worker
 ```
 
 ## Security boundaries

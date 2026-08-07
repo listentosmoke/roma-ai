@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createTaskNotifier } from '../src/agent/taskNotifier.js';
-import { registerServerTaskTools, formatPendingTasks } from '../src/agent/serverTasks.js';
+import { registerServerTaskTools, formatPendingTasks, formatRegisteredProjects } from '../src/agent/serverTasks.js';
 import { createToolRegistry } from '../src/agent/tools.js';
 
 const task = (over = {}) => ({ taskId: 'task_1', title: 'review the module', goal: 'review the module', status: 'running', progress: [], pendingRequest: null, resultSummary: null, error: null, ...over });
@@ -102,6 +102,30 @@ test('only tasks blocked on the wearer enter the prompt context', () => {
   assert.match(block, /task_9/);
   assert.match(block, /Apply the migration\?/);
   assert.ok(!block.includes('task_8'), 'work that is not waiting is not mentioned');
+});
+
+test('Roma is told which projects the background agent can work in', () => {
+  // Without this block she has no evidence any codebase is reachable. Asked to
+  // look at "the roma project" in a live run she replied "I don't have access
+  // to the source code" and never dispatched — true of herself, wrong overall.
+  assert.equal(formatRegisteredProjects([]), '', 'nothing registered means no block at all');
+  const block = formatRegisteredProjects([
+    { name: 'roma', rootPath: 'C:/repos/roma', defaultTestCmd: 'npm test' },
+    { name: 'widgets', rootPath: 'C:/repos/widgets', defaultTestCmd: null },
+  ]);
+  assert.match(block, /roma/);
+  assert.match(block, /npm test/);
+  assert.match(block, /widgets/);
+  // Filesystem paths are the worker's business, not the conversational model's.
+  assert.ok(!block.includes('C:/repos'), 'root paths never enter the prompt');
+});
+
+test('the dispatch tool tells the model it cannot read files itself', () => {
+  const registry = createToolRegistry();
+  registerServerTaskTools(registry, { tasks: { dispatch: async () => ({ ok: true, task: {} }), status: async () => ({}), respond: async () => ({}), cancel: async () => ({}) } });
+  const description = registry.descriptions().find((tool) => tool.name === 'dispatch_server_task').description;
+  assert.match(description, /cannot read files/i);
+  assert.match(description, /what does this file do/i, 'small-sounding code questions must route here too');
 });
 
 test('the dispatch tool reports that work STARTED, never that it finished', async () => {
