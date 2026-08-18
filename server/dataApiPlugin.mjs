@@ -18,6 +18,10 @@ import { createDispatcher } from './agentEnv/dispatcher.mjs';
 import { createMockWorker } from './agentEnv/workers/mock.mjs';
 import { createQwenCodeWorker } from './agentEnv/workers/qwenCode.mjs';
 import { createAgentTaskHandlers, attachAgentTaskApi } from './routes/agentTasks.mjs';
+import { createFaceIdentityService } from './faceIdentity/service.mjs';
+import { createFaceTemplateRepository } from './faceIdentity/templateRepository.mjs';
+import { createTemplateCipher } from './voiceIdentity/crypto.mjs';
+import { createFaceApiHandlers, attachFaceApi } from './routes/faceApi.mjs';
 
 /**
  * Is this process a test run? `node --test` sets NODE_TEST_CONTEXT in the
@@ -91,7 +95,30 @@ export function createDataApi({ dbPath = process.env.ROMA_DB_PATH || undefined, 
   if (interrupted) log.warn(`[agent-env] marked ${interrupted} interrupted background task(s) as failed after restart.`);
   const agentTaskHandlers = createAgentTaskHandlers({ taskStore, engineeringMemory, dispatcher, auth });
 
-  return { db, auth, repositories, handlers, voiceIdentity, taskStore, engineeringMemory, dispatcher, agentTaskHandlers };
+  // ── face identity ────────────────────────────────────────────────────────
+  // Consent enforcement is OFF here (FACE_IDENTITY_REQUIRE_CONSENT=1 restores
+  // it). The encoder loads lazily on first use so startup never blocks on a
+  // 190 MB model, and a machine without the model simply has the subsystem
+  // fail closed rather than the server refusing to boot.
+  // The cipher reads its key from .env through the loader, not from
+  // process.env: a key correctly set in .env was otherwise reported as missing
+  // and the whole subsystem failed closed for no reason.
+  const biometricEnv = loadWorkerConfigEnv();
+  const faceCipher = createTemplateCipher({
+    key: biometricEnv.BIOMETRIC_ENCRYPTION_KEY,
+    keyVersion: Number(biometricEnv.BIOMETRIC_ENCRYPTION_KEY_VERSION ?? 1),
+  });
+  const faceIdentity = createFaceIdentityService({
+    db,
+    repository: createFaceTemplateRepository({ db, cipher: faceCipher }),
+    consentRepository: repositories.consentRepository,
+  });
+  const faceDescribed = faceIdentity.describe();
+  if (!faceDescribed.configured) log.warn('[face-identity] BIOMETRIC_ENCRYPTION_KEY not set — face identity fails closed.');
+  else if (!faceDescribed.requireConsent) log.warn('[face-identity] enabled with CONSENT ENFORCEMENT OFF — templates can be enrolled without a consent record. Set FACE_IDENTITY_REQUIRE_CONSENT=1 to restore it.');
+  const faceHandlers = createFaceApiHandlers({ faceIdentity, auth, identityRepository: repositories.identityRepository, auditRepository: repositories.auditRepository });
+
+  return { db, auth, repositories, handlers, voiceIdentity, taskStore, engineeringMemory, dispatcher, agentTaskHandlers, faceIdentity, faceHandlers };
 }
 
 export function dataApiPlugin({ voiceIdentity = getSharedVoiceIdentityService() } = {}) {
@@ -100,6 +127,7 @@ export function dataApiPlugin({ voiceIdentity = getSharedVoiceIdentityService() 
     api ??= createDataApi({ voiceIdentity });
     attachDataApi(server.middlewares, api.handlers);
     attachAgentTaskApi(server.middlewares, api.agentTaskHandlers);
+    attachFaceApi(server.middlewares, api.faceHandlers);
   };
   return {
     name: 'roma-data-api',

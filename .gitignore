@@ -15,6 +15,9 @@ data/*.db-*
 .claude/
 .agents/
 .codex/
+# downloaded ML model cache (face encoder ~190 MB; re-fetched on demand)
+.models/
+
 # virtual-hardware lab outputs (generated media cache + run reports)
 .simcache/
 .simreports/

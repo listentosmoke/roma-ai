@@ -35,13 +35,16 @@
     "verify:virtual-lab": "node scripts/verify-virtual-lab.mjs",
     "verify:qwen-worker": "node scripts/verify-qwen-worker.mjs",
     "test:vision-live": "node scripts/test-vision-live.mjs",
-    "test:tts-live": "node scripts/test-tts-live.mjs"
+    "test:tts-live": "node scripts/test-tts-live.mjs",
+    "verify:face-provider": "node scripts/verify-face-provider.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
     "lucide-react": "latest",
+    "onnxruntime-node": "1.24.3",
     "react": "latest",
     "react-dom": "latest",
+    "sharp": "^0.34.5",
     "vite": "latest",
     "ws": "^8.21.0"
   }

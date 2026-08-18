@@ -5,9 +5,9 @@ import { openDatabase, runMigrations, currentSchemaVersion, listMigrations } fro
 
 test('migrations apply from an empty database', () => {
   const db = openDatabase({ memory: true });
-  assert.equal(currentSchemaVersion(db), '0004_agent_environment');
+  assert.equal(currentSchemaVersion(db), '0005_face_identity');
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name);
-  for (const expected of ['memories', 'people', 'relationships', 'identity_evidence', 'sessions', 'audit_events', 'consent_records', 'voice_profile_refs', 'voice_templates', 'tombstones', 'operation_ids', 'schema_migrations']) {
+  for (const expected of ['memories', 'people', 'relationships', 'identity_evidence', 'sessions', 'audit_events', 'consent_records', 'voice_profile_refs', 'voice_templates', 'face_templates', 'tombstones', 'operation_ids', 'schema_migrations']) {
     assert.ok(tables.includes(expected), `missing table: ${expected}`);
   }
   db.close();

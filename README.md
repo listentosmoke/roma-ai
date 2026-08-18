@@ -40,6 +40,12 @@ in-process Node server that holds every API key and a SQLite database.
   supersession chains, and ranked retrieval, stored server-side in SQLite.
 - **Entity resolution + relationships** — stable person records, aliases,
   evidence chains; diarization labels are never auto-promoted to identities.
+- **Facial recognition** — local InsightFace (SCRFD + ArcFace, 512-d) running
+  server-side through onnxruntime; templates are AES-256-GCM encrypted and
+  never leave the machine. A match is *evidence*, never authentication, there
+  is **no liveness detection**, and **consent enforcement is currently OFF**
+  (`FACE_IDENTITY_REQUIRE_CONSENT=1` restores it). Models are non-commercial
+  research use. See [PLAN-FACE-IDENTITY.md](PLAN-FACE-IDENTITY.md).
 - **Real voice identity** — explicit, consented speaker enrollment with a
   local WavLM encoder (audio never leaves the machine); AES-256-GCM-encrypted
   templates; probabilistic matching that is *evidence*, never authentication.
@@ -120,7 +126,7 @@ untrusted users as-is.
 ## Tests, simulations, build
 
 ```bash
-npm test                  # full offline suite (683 tests, ~3s, no network/keys)
+npm test                  # full offline suite (701 tests, ~3s, no network/keys)
 npm run build             # production bundle (dist/)
 npm run preflight         # server-side startup health check
 

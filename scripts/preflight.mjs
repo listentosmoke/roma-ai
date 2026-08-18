@@ -38,6 +38,7 @@ try {
   coreOk = false;
 }
 
+const workerConfigEnvEarly = loadWorkerConfigEnv();
 const env = loadServerEnv();
 report('groq', env.groqApiKey ? 'ready' : 'unavailable', env.groqApiKey ? `agent ${env.agentModel} · vision ${env.visionModel}` : 'GROQ_API_KEY not set — agent falls back to mock');
 report('deepgram', env.deepgramApiKey ? 'ready' : 'unavailable', env.deepgramApiKey ? 'STT streaming via local proxy' : 'DEEPGRAM_API_KEY not set — transcription unavailable');
@@ -49,8 +50,11 @@ report('auth', auth.mode === 'development' ? 'degraded' : 'blocked', auth.mode =
   ? `development principal (${auth.devUserId}/${auth.devWorkspaceId}) — NOT production authentication`
   : 'production mode fails closed until a real verifyToken is configured');
 
-const biometricKey = process.env.BIOMETRIC_ENCRYPTION_KEY ? 'ready' : 'misconfigured';
-report('biometricEncryption', biometricKey, biometricKey === 'ready' ? `key version ${process.env.BIOMETRIC_ENCRYPTION_KEY_VERSION ?? 1}` : 'BIOMETRIC_ENCRYPTION_KEY not set — voice identity fails closed (optional subsystem)');
+// Read through the .env loader like every other check above. Reading
+// process.env directly reported a correctly-configured key as missing.
+const biometricConfigured = Boolean((workerConfigEnvEarly.BIOMETRIC_ENCRYPTION_KEY ?? '').trim());
+const biometricKey = biometricConfigured ? 'ready' : 'misconfigured';
+report('biometricEncryption', biometricKey, biometricKey === 'ready' ? `key version ${workerConfigEnvEarly.BIOMETRIC_ENCRYPTION_KEY_VERSION ?? 1}` : 'BIOMETRIC_ENCRYPTION_KEY not set — voice identity fails closed (optional subsystem)');
 
 // Background engineering worker (optional subsystem; see AGENT-ENV.md).
 // Worth reporting because "which engine will actually run my tasks, and can it
