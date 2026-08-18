@@ -1,0 +1,20 @@
+{
+  "scenarioId": "fault_agent_unavailable",
+  "version": 1,
+  "family": "faults",
+  "description": "Groq inference blocked at the real network boundary mid-session: the turn fails visibly (error event, no invented answer); recovery restores normal responses.",
+  "environment": { "roomProfile": "quiet_office", "visualTier": "deterministic_geometric" },
+  "people": [
+    { "simulationId": "sim_orion", "voice": "aura:aura-2-orion-en", "position": { "x": 0.5, "y": 0, "z": 1 } }
+  ],
+  "events": [
+    { "action": "ui.click", "control": "start" },
+    { "action": "fault.trigger", "fault": "agent_block" },
+    { "action": "person.speak", "person": "sim_orion", "text": "Roma, what time is it?", "addressedToRoma": true },
+    { "action": "wait_for", "condition": "roma.error_event", "timeoutMs": 45000 },
+    { "action": "assert", "condition": "roma.no_response", "message": "a failed inference must not produce an invented answer" },
+    { "action": "fault.clear", "fault": "agent_block" },
+    { "action": "person.speak", "person": "sim_orion", "text": "Roma, what time is it at the moment?", "addressedToRoma": true },
+    { "action": "wait_for", "condition": "roma.decision_respond", "timeoutMs": 40000 }
+  ]
+}

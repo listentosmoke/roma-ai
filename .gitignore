@@ -1,8 +1,23 @@
 node_modules/
 dist/
+.vite/
 .DS_Store
 .env
 .env.*
+!.env.example
 artifacts/
+.bench-audio/
+.testdata/
+roma-tts.*
+data/*.db
+data/*.db-*
+# machine-local agent/tooling state (contains machine-specific paths)
+.claude/
+.agents/
+.codex/
+# downloaded ML model cache (face encoder ~190 MB; re-fetched on demand)
+.models/
 
-benchmark-results/
+# virtual-hardware lab outputs (generated media cache + run reports)
+.simcache/
+.simreports/

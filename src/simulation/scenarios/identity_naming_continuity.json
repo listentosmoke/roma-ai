@@ -1,0 +1,19 @@
+{
+  "scenarioId": "identity_naming_continuity",
+  "version": 1,
+  "family": "identity",
+  "description": "A speaker self-identifies through real virtual-microphone speech; the agent's identity tools create a provisional person through the normal evidence pipeline (never auto-promoted from the diarization label).",
+  "environment": { "roomProfile": "quiet_office", "visualTier": "deterministic_geometric" },
+  "people": [
+    { "simulationId": "sim_orion", "voice": "aura:aura-2-orion-en", "position": { "x": 0.5, "y": 0, "z": 1 } }
+  ],
+  "events": [
+    { "action": "ui.click", "control": "start" },
+    { "action": "person.speak", "person": "sim_orion", "text": "Roma, this is Nathan speaking. Please remember me.", "addressedToRoma": true },
+    { "action": "wait_for", "condition": "roma.turn_completed", "timeoutMs": 40000 },
+    { "action": "wait", "ms": 4000 },
+    { "action": "person.speak", "person": "sim_orion", "text": "Roma, who am I?", "addressedToRoma": true },
+    { "action": "wait_for", "condition": "roma.decision_answered", "timeoutMs": 40000 },
+    { "action": "assert", "condition": "roma.no_console_errors" }
+  ]
+}

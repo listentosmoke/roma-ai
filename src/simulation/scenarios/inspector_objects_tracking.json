@@ -1,0 +1,22 @@
+{
+  "scenarioId": "inspector_objects_tracking",
+  "version": 1,
+  "family": "inspector",
+  "description": "Real COCO-SSD detects detector-friendly rendered objects in the virtual camera; movement updates tracking; removal marks the object missing; lighting changes real pixels.",
+  "environment": { "roomProfile": "quiet_office", "visualTier": "recognition_compatible" },
+  "people": [],
+  "events": [
+    { "action": "object.add", "object": "sign1", "kind": "stop sign", "x": 640, "y": 300, "width": 220 },
+    { "action": "object.add", "object": "clock1", "kind": "clock", "x": 260, "y": 200, "width": 150 },
+    { "action": "ui.click", "control": "camera" },
+    { "action": "wait_for", "condition": "roma.detection_ran", "timeoutMs": 90000 },
+    { "action": "wait_for", "condition": "roma.scene_object_visible", "param": "stop sign", "timeoutMs": 30000 },
+    { "action": "object.move", "object": "sign1", "x": 950, "y": 340 },
+    { "action": "wait_for", "condition": "roma.scene_updated", "timeoutMs": 20000 },
+    { "action": "object.remove", "object": "sign1" },
+    { "action": "wait_for", "condition": "roma.scene_object_missing", "param": "stop sign", "timeoutMs": 30000 },
+    { "action": "lighting.set", "level": 0.1 },
+    { "action": "wait_for", "condition": "sim.frames_advancing", "timeoutMs": 8000 },
+    { "action": "assert", "condition": "roma.no_console_errors" }
+  ]
+}

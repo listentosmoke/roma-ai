@@ -1,0 +1,21 @@
+{
+  "scenarioId": "memory_remember_recall_virtual",
+  "version": 1,
+  "family": "memory",
+  "description": "A commitment spoken through the virtual microphone is extracted by real Groq, acknowledged into the isolated SQLite database by the mutation queue, and recalled aloud on a later turn.",
+  "environment": { "roomProfile": "quiet_office", "visualTier": "deterministic_geometric" },
+  "people": [
+    { "simulationId": "sim_orion", "voice": "aura:aura-2-orion-en", "position": { "x": 0.5, "y": 0, "z": 1 } }
+  ],
+  "events": [
+    { "action": "ui.click", "control": "start" },
+    { "action": "person.speak", "person": "sim_orion", "text": "Roma, remember that I need to send Matt the building five HVAC quote tomorrow morning.", "addressedToRoma": true },
+    { "action": "wait_for", "condition": "roma.turn_completed", "timeoutMs": 40000 },
+    { "action": "assert", "condition": "roma.memory_written", "scope": "scenarioStart", "timeoutMs": 30000, "message": "the spoken commitment must become a durable memory record" },
+    { "action": "assert", "condition": "roma.queue_acknowledged", "scope": "scenarioStart", "timeoutMs": 20000, "message": "the mutation queue must reach the isolated SQLite server" },
+    { "action": "person.speak", "person": "sim_orion", "text": "Roma, what did I ask you to remember about Matt?", "addressedToRoma": true },
+    { "action": "wait_for", "condition": "roma.memory_recalled", "timeoutMs": 40000 },
+    { "action": "wait_for", "condition": "roma.playback_started", "timeoutMs": 25000 },
+    { "action": "assert", "condition": "roma.no_console_errors" }
+  ]
+}

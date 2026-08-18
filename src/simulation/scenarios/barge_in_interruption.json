@@ -1,0 +1,19 @@
+{
+  "scenarioId": "barge_in_interruption",
+  "version": 1,
+  "family": "room",
+  "description": "A second person interrupts during Roma's real playback; sustained genuine speech through the virtual microphone must stop playback (barge-in) and become a fresh turn.",
+  "environment": { "roomProfile": "quiet_office", "visualTier": "deterministic_geometric" },
+  "people": [
+    { "simulationId": "sim_orion", "voice": "aura:aura-2-orion-en", "position": { "x": 0.5, "y": 0, "z": 1 } },
+    { "simulationId": "sim_thalia", "voice": "aura:aura-2-thalia-en", "position": { "x": -1, "y": 0, "z": 1.2 } }
+  ],
+  "events": [
+    { "action": "ui.click", "control": "start" },
+    { "action": "person.speak", "person": "sim_orion", "text": "Roma, please tell me a short story about a dog, in about four sentences.", "addressedToRoma": true },
+    { "action": "person.interrupt", "person": "sim_thalia", "text": "Hold on a second, Roma — actually, what time is it?", "afterPlaybackMs": 700 },
+    { "action": "wait_for", "condition": "roma.playback_stopped", "timeoutMs": 25000 },
+    { "action": "assert", "condition": "roma.barge_in", "scope": "scenarioStart", "message": "the interruption must be counted as a barge-in, not an echo" },
+    { "action": "assert", "condition": "roma.no_console_errors" }
+  ]
+}

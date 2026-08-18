@@ -1,0 +1,24 @@
+{
+  "scenarioId": "wearer_addressed_by_other",
+  "version": 1,
+  "family": "wearer",
+  "description": "Glasses reframe: a coworker asks the WEARER a question. Roma must not answer for them, must classify the turn as addressed_to=wearer, and must record that the wearer is expected to reply — the case where private assistance belongs.",
+  "environment": { "roomProfile": "quiet_office", "visualTier": "deterministic_geometric" },
+  "people": [
+    { "simulationId": "sim_wearer", "voice": "aura:aura-2-thalia-en", "position": { "x": 0, "y": 0, "z": 0.4 } },
+    { "simulationId": "sim_matt", "voice": "aura:aura-2-orion-en", "position": { "x": 1.5, "y": 0, "z": 2 } }
+  ],
+  "events": [
+    { "action": "ui.click", "control": "start" },
+
+    { "action": "person.speak", "person": "sim_wearer", "text": "Roma, remember that the building five HVAC quote came to eight thousand four hundred dollars.", "addressedToRoma": true },
+    { "action": "wait_for", "condition": "roma.turn_classified", "param": "addressed_to=roma", "timeoutMs": 60000 },
+    { "action": "wait", "ms": 3000, "note": "let the first turn fully settle — overlapping turns make the classification checks ambiguous" },
+
+    { "action": "person.speak", "person": "sim_matt", "text": "Hey, can you drive over to the building five site with me after lunch and walk the roof?", "addressedToRoma": false, "groundTruth": "only a physically present human can do this — unambiguously addressed to the wearer, who is expected to answer" },
+    { "action": "wait_for", "condition": "roma.turn_classified", "param": "addressed_to=wearer", "timeoutMs": 45000 },
+    { "action": "assert", "condition": "roma.turn_classified", "param": "wearer_expected_to_respond", "scope": "scenarioStart", "message": "a request aimed at the wearer means the wearer must reply" },
+    { "action": "assert", "condition": "roma.no_response", "message": "Roma must not answer on the wearer's behalf" },
+    { "action": "assert", "condition": "roma.no_console_errors" }
+  ]
+}

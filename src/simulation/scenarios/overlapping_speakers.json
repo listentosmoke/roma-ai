@@ -1,0 +1,21 @@
+{
+  "scenarioId": "overlapping_speakers",
+  "version": 1,
+  "family": "room",
+  "description": "Two clearly different voices (recorded human speech, opposite pan, different distances) overlap in a meeting room; the pipeline transcribes without crashing, labels stay transient diarization labels, and no response is invented.",
+  "environment": { "roomProfile": "meeting_2p", "visualTier": "deterministic_geometric" },
+  "people": [
+    { "simulationId": "sim_dan", "voice": "fixture:dan-c", "position": { "x": -2, "y": 0, "z": 1.2 } },
+    { "simulationId": "sim_vanessa", "voice": "fixture:vanessa", "position": { "x": 2, "y": 0, "z": 2.2 } }
+  ],
+  "events": [
+    { "action": "ui.click", "control": "start" },
+    { "action": "person.speak", "person": "sim_dan", "text": "(recorded Dan clip)", "addressedToRoma": false },
+    { "action": "wait", "ms": 1500 },
+    { "action": "person.speak", "person": "sim_vanessa", "text": "(overlapping recorded Vanessa clip)", "addressedToRoma": false },
+    { "action": "wait_for", "condition": "roma.segment_finalized", "timeoutMs": 40000 },
+    { "action": "wait", "ms": 8000 },
+    { "action": "assert", "condition": "roma.no_response", "message": "overlapping ambient conversation must not trigger a reply" },
+    { "action": "assert", "condition": "roma.no_console_errors" }
+  ]
+}

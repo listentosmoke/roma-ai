@@ -1,0 +1,187 @@
+{
+  "scenarioId": "nl_demo_noisy_hvac_office",
+  "version": 1,
+  "family": "authored",
+  "description": "Claude-authored from a natural-language goal: a noisy maintenance office where two people discuss an HVAC quote; one addresses Roma from across the room; Roma answers; the answer echoes into the microphone and is suppressed; the second person interrupts a later reply (barge-in); a chair is removed from the camera scene before someone asks what is visible.",
+  "environment": {
+    "roomProfile": "noisy_workshop",
+    "visualTier": "recognition_compatible"
+  },
+  "people": [
+    {
+      "simulationId": "sim_alex",
+      "voice": "aura:aura-2-thalia-en",
+      "position": {
+        "x": 1,
+        "y": 0,
+        "z": 1.2
+      },
+      "visible": true,
+      "frameX": 420,
+      "frameY": 430
+    },
+    {
+      "simulationId": "sim_matt",
+      "voice": "aura:aura-2-orion-en",
+      "position": {
+        "x": -2.5,
+        "y": 0,
+        "z": 3.5
+      },
+      "visible": true,
+      "frameX": 900,
+      "frameY": 400
+    }
+  ],
+  "events": [
+    {
+      "action": "object.add",
+      "object": "chair1",
+      "kind": "chair",
+      "x": 640,
+      "y": 500,
+      "width": 180
+    },
+    {
+      "action": "object.add",
+      "object": "sign1",
+      "kind": "stop sign",
+      "x": 260,
+      "y": 260,
+      "width": 190
+    },
+    {
+      "action": "ui.click",
+      "control": "camera"
+    },
+    {
+      "action": "wait_for",
+      "condition": "roma.detection_ran",
+      "timeoutMs": 90000
+    },
+    {
+      "action": "ui.click",
+      "control": "start"
+    },
+    {
+      "action": "person.speak",
+      "person": "sim_alex",
+      "text": "Matt, did you ever send the building five HVAC quote over to the client?",
+      "addressedToRoma": false
+    },
+    {
+      "action": "wait_for",
+      "condition": "roma.segment_finalized",
+      "timeoutMs": 30000
+    },
+    {
+      "action": "wait",
+      "ms": 6000
+    },
+    {
+      "action": "assert",
+      "condition": "roma.no_response",
+      "message": "shop talk between coworkers is not addressed to Roma"
+    },
+    {
+      "action": "echo.configure",
+      "enabled": true,
+      "gain": 0.45,
+      "delayMs": 150,
+      "lowpassHz": 4500
+    },
+    {
+      "action": "person.speak",
+      "person": "sim_matt",
+      "text": "Roma, what time is it over there?",
+      "addressedToRoma": true
+    },
+    {
+      "action": "wait_for",
+      "condition": "roma.decision_respond",
+      "timeoutMs": 40000
+    },
+    {
+      "action": "wait_for",
+      "condition": "roma.playback_started",
+      "timeoutMs": 25000
+    },
+    {
+      "action": "wait_for",
+      "condition": "roma.playback_completed",
+      "timeoutMs": 30000
+    },
+    {
+      "action": "wait_for",
+      "condition": "roma.echo_suppressed",
+      "timeoutMs": 25000
+    },
+    {
+      "action": "wait",
+      "ms": 5000
+    },
+    {
+      "action": "assert",
+      "condition": "roma.no_echo_response",
+      "message": "the workshop echo of Roma's own answer must stay inert"
+    },
+    {
+      "action": "echo.configure",
+      "enabled": false,
+      "note": "echo section done - isolate the barge-in test from acoustic self-masking"
+    },
+    {
+      "action": "person.move",
+      "person": "sim_matt",
+      "distance": 1,
+      "note": "Matt walks over before interrupting"
+    },
+    {
+      "action": "person.speak",
+      "person": "sim_alex",
+      "text": "Roma, tell me a short story about a furnace, in about four sentences.",
+      "addressedToRoma": true
+    },
+    {
+      "action": "person.interrupt",
+      "person": "sim_matt",
+      "text": "Hang on Roma — Alex, the client is on the phone right now.",
+      "afterPlaybackMs": 700
+    },
+    {
+      "action": "wait_for",
+      "condition": "roma.playback_stopped",
+      "timeoutMs": 25000
+    },
+    {
+      "action": "assert",
+      "condition": "roma.barge_in",
+      "scope": "scenarioStart",
+      "message": "the interruption from the second person is a barge-in"
+    },
+    {
+      "action": "object.remove",
+      "object": "chair1"
+    },
+    {
+      "action": "wait_for",
+      "condition": "roma.scene_updated",
+      "timeoutMs": 25000
+    },
+    {
+      "action": "person.speak",
+      "person": "sim_alex",
+      "text": "Roma, what can you see right now?",
+      "addressedToRoma": true
+    },
+    {
+      "action": "wait_for",
+      "condition": "roma.decision_respond",
+      "timeoutMs": 60000
+    },
+    {
+      "action": "assert",
+      "condition": "roma.no_console_errors"
+    }
+  ]
+}
