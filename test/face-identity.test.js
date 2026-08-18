@@ -10,7 +10,7 @@ import { openDatabase } from '../server/db/index.mjs';
 import { createTemplateCipher } from '../server/voiceIdentity/crypto.mjs';
 import { createFaceTemplateRepository } from '../server/faceIdentity/templateRepository.mjs';
 import { createFaceIdentityService } from '../server/faceIdentity/service.mjs';
-import { cosineSimilarity } from '../server/faceIdentity/provider.mjs';
+import { cosineSimilarity, averageEmbeddings, faceQuality } from '../server/faceIdentity/provider.mjs';
 
 const KEY = Buffer.alloc(32, 7).toString('base64');
 const DIMS = 512;
@@ -32,59 +32,61 @@ function fixture({ requireConsent = false } = {}) {
   const provider = {
     describe: () => ({ provider: 'fake', repo: 'fake/model', revision: 'rev0', dims: DIMS, liveness: false }),
     async detect(buffer) {
-      return JSON.parse(buffer.toString()).map((face, index) => ({ score: 0.9, x1: index * 10, y1: 0, x2: index * 10 + 10, y2: 10, seed: face.seed, landmarks: [] }));
+      // Boxes are deliberately large enough to clear the quality gate; a test that
+      // enrolled 10px faces would be testing a path real frames never take.
+      return JSON.parse(buffer.toString()).map((face, index) => ({ score: face.score ?? 0.9, x1: index * 200, y1: 0, x2: index * 200 + 120, y2: 120, seed: face.seed, landmarks: [] }));
     },
     async embed(buffer, face) { return vector(face.seed); },
   };
-  const repository = createFaceTemplateRepository({ db, cipher: createTemplateCipher({ key: KEY }) });
+  const repository = createFaceTemplateRepository({ db });
   const service = createFaceIdentityService({ db, provider, repository, requireConsent });
   const image = (list) => Buffer.from(JSON.stringify(list));
   return { db, service, repository, image };
 }
 
-test('an enrolled template is encrypted at rest and never stored in the clear', async () => {
+test('a template round-trips exactly through storage', async () => {
   const f = fixture();
   const result = await f.service.enroll({ workspaceId: 'ws', personId: 'p1', imageBuffer: f.image([{ seed: 1 }]) });
   assert.equal(result.ok, true);
-
-  const row = f.db.prepare('SELECT * FROM face_templates').get();
-  assert.equal(row.encryption_algorithm, 'aes-256-gcm');
-  assert.equal(row.dimensions, DIMS);
-  const stored = Buffer.from(row.encrypted_template, 'base64');
-  const plaintext = Buffer.from(vector(1).buffer);
-  assert.ok(!stored.includes(plaintext.subarray(0, 32)), 'ciphertext must not contain the raw template');
+  const stored = f.repository.forWorkspace('ws').openTemplate(result.profile.faceProfileId);
+  assert.equal(stored.length, DIMS);
+  assert.ok(cosineSimilarity(stored, vector(1)) > 0.9999, 'the stored template must be the embedding, undamaged');
   assert.equal(result.profile.template, undefined, 'the returned profile carries no template');
   f.db.close();
 });
 
-test('a template cannot be decrypted with the wrong key, and identifies nobody', async () => {
+test('templates are stored WITHOUT at-rest encryption — a deliberate, recorded trade', async () => {
+  // Decision: the device uses full-disk encryption, so the application layer was
+  // removed (migration 0006). This test exists so that is a visible property of
+  // the system rather than something discovered by reading a schema. It also
+  // pins what was given up: the old AES-GCM layer bound a template to its
+  // person, so a row edited to point elsewhere failed to open. It no longer can.
   const f = fixture();
-  await f.service.enroll({ workspaceId: 'ws', personId: 'p1', imageBuffer: f.image([{ seed: 1 }]) });
-  const row = f.db.prepare('SELECT face_profile_id FROM face_templates').get();
+  const enrolled = await f.service.enroll({ workspaceId: 'ws', personId: 'p1', imageBuffer: f.image([{ seed: 1 }]) });
+  const row = f.db.prepare('SELECT * FROM face_templates').get();
+  assert.equal(row.encryption_algorithm, 'none');
+  assert.ok(row.template_plain, 'the template is stored in the plaintext column');
+  assert.equal(f.repository.status().atRestEncryption, false);
 
-  const wrongKey = createFaceTemplateRepository({ db: f.db, cipher: createTemplateCipher({ key: Buffer.alloc(32, 9).toString('base64') }) });
-  assert.equal(wrongKey.forWorkspace('ws').openTemplate(row.face_profile_id), null, 'a wrong key must yield nothing, not garbage');
+  f.db.prepare("UPDATE face_templates SET person_id = 'p2' WHERE face_profile_id = ?").run(enrolled.profile.faceProfileId);
+  assert.notEqual(f.repository.forWorkspace('ws').openTemplate(enrolled.profile.faceProfileId), null,
+    'a moved row now opens — the integrity binding went with the encryption');
   f.db.close();
 });
 
-test('a template moved to another person fails authentication instead of misidentifying them', async () => {
+test('a malformed template identifies nobody rather than scoring against anything', async () => {
   const f = fixture();
-  await f.service.enroll({ workspaceId: 'ws', personId: 'p1', imageBuffer: f.image([{ seed: 1 }]) });
-  const row = f.db.prepare('SELECT face_profile_id FROM face_templates').get();
-  // The cipher binds ciphertext to workspace + person + profile as associated data.
-  f.db.prepare("UPDATE face_templates SET person_id = 'p2' WHERE face_profile_id = ?").run(row.face_profile_id);
-  assert.equal(f.repository.forWorkspace('ws').openTemplate(row.face_profile_id), null);
+  const enrolled = await f.service.enroll({ workspaceId: 'ws', personId: 'p1', imageBuffer: f.image([{ seed: 1 }]) });
+  f.db.prepare('UPDATE face_templates SET template_plain = ? WHERE face_profile_id = ?').run('bm90LWEtdGVtcGxhdGU=', enrolled.profile.faceProfileId);
+  assert.equal(f.repository.forWorkspace('ws').openTemplate(enrolled.profile.faceProfileId), null);
   f.db.close();
 });
 
-test('without an encryption key the subsystem fails closed', async () => {
-  const db = openDatabase({ memory: true });
-  const repository = createFaceTemplateRepository({ db, cipher: createTemplateCipher({ key: '' }) });
-  const service = createFaceIdentityService({ db, provider: { describe: () => ({}), detect: async () => [], embed: async () => vector(1) }, repository });
-  const result = await service.enroll({ workspaceId: 'ws', personId: 'p1', imageBuffer: Buffer.from('[]') });
-  assert.equal(result.ok, false);
-  assert.equal(result.reasonCode, 'encryption_key_missing');
-  db.close();
+test('face identity no longer needs an encryption key to work', async () => {
+  const f = fixture();
+  assert.equal(f.repository.configured, true);
+  assert.equal((await f.service.enroll({ workspaceId: 'ws', personId: 'p1', imageBuffer: f.image([{ seed: 1 }]) })).ok, true);
+  f.db.close();
 });
 
 test('enrollment refuses an image with no face, or with more than one', async () => {

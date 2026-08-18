@@ -90,11 +90,14 @@ export function createFaceApiHandlers({ faceIdentity, auth, identityRepository =
       const principal = await principalOf(req, res); if (!principal) return;
       if (!enrollLimit(principal.userId)) { sendJson(res, 429, { error: 'Too many enrollments.', code: 'rate_limited' }); return; }
       const body = await readJsonBody(req);
-      const image = decodeImage(body.image);
-      if (!image) { sendJson(res, 400, { error: 'A base64 image is required.', code: 'image_required' }); return; }
+      // One image, or several of the same face — several is strongly preferred,
+      // because a single frame binds someone to one pose and one lighting.
+      const raw = Array.isArray(body.images) ? body.images.slice(0, 8) : [body.image];
+      const images = raw.map(decodeImage).filter(Boolean);
+      if (!images.length) { sendJson(res, 400, { error: 'At least one base64 image is required.', code: 'image_required' }); return; }
       if (!body.personId) { sendJson(res, 400, { error: 'personId is required.', code: 'person_required' }); return; }
 
-      const result = await faceIdentity.enroll({ workspaceId: principal.workspaceId, personId: body.personId, imageBuffer: image });
+      const result = await faceIdentity.enroll({ workspaceId: principal.workspaceId, personId: body.personId, imageBuffers: images });
       audit(principal, {
         action: 'face.enroll', resourceType: 'face_profile', resourceId: result.profile?.faceProfileId ?? null,
         outcome: result.ok ? 'enrolled' : 'rejected', reasonCode: result.reasonCode ?? null,

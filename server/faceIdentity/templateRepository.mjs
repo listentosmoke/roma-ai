@@ -1,14 +1,28 @@
-// Encrypted face-template storage. Deliberately the same shape as
-// server/repositories/voiceTemplateRepository.mjs and using the SAME
-// AES-256-GCM cipher and BIOMETRIC_ENCRYPTION_KEY, so there is one key
-// management and rotation story for biometrics rather than two.
+// Face-template storage.
 //
-// A template is a 512-d embedding. It never leaves this process in plaintext,
-// never enters a prompt, and never reaches the client bundle.
+// Templates are stored as PLAIN base64 float32 — no application-level
+// encryption. The device this runs on uses full-disk encryption, so a second
+// at-rest layer was judged redundant for a local single-user deployment.
+// Migration 0006 records what that trades away: the AES-GCM layer also bound
+// each template to its workspace+person+profile, so a row edited to point at a
+// different person failed to open rather than misidentifying them.
+//
+// Voice templates are NOT affected and remain AES-256-GCM encrypted.
+//
+// A template is a 512-d embedding. It still never crosses the wire, never
+// enters a prompt, and never reaches the client bundle.
 
-import { createTemplateCipher } from '../voiceIdentity/crypto.mjs';
+const TEMPLATE_VERSION = 2; // 2 = plaintext storage
 
-const TEMPLATE_VERSION = 1;
+function encodeTemplate(embedding) {
+  return Buffer.from(new Float32Array(embedding).buffer).toString('base64');
+}
+
+function decodeTemplate(text) {
+  if (!text) return null;
+  const bytes = Buffer.from(text, 'base64');
+  return new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
+}
 
 function rowToProfile(row) {
   return {
@@ -29,38 +43,35 @@ function rowToProfile(row) {
   };
 }
 
-export function createFaceTemplateRepository({ db, cipher = createTemplateCipher(), now = Date.now } = {}) {
+export function createFaceTemplateRepository({ db, now = Date.now } = {}) {
   let counter = 0;
 
   return {
-    get configured() { return cipher.configured; },
-    status: () => cipher.status(),
+    // Nothing to configure: no key is needed to store or read a template, so
+    // face identity no longer fails closed without BIOMETRIC_ENCRYPTION_KEY.
+    get configured() { return true; },
+    status: () => ({ atRestEncryption: false, note: 'plaintext templates; relies on full-disk encryption' }),
 
     forWorkspace(workspaceId) {
       const api = {
         /** Store an embedding for a person. Returns the profile WITHOUT the template. */
-        enroll({ personId, embedding, provider, model, modelRevision, quality = 1, consentId = null }) {
-          if (!cipher.configured) return { ok: false, reasonCode: 'encryption_key_missing' };
+        enroll({ personId, embedding, provider, model, modelRevision, quality = 1, sampleCount = 1, consentId = null }) {
           if (!personId) return { ok: false, reasonCode: 'person_required' };
           if (!embedding?.length) return { ok: false, reasonCode: 'empty_template' };
 
           counter += 1;
           const faceProfileId = `face_${now()}_${counter}`;
           const at = now();
-          // The associated data binds the ciphertext to this profile and person:
-          // a template moved to another row fails authentication instead of
-          // silently identifying the wrong human being.
-          const sealed = cipher.encrypt(embedding, { workspaceId, personId, profileId: faceProfileId });
           db.prepare(`INSERT INTO face_templates (
             face_profile_id, workspace_id, person_id, provider, model, model_revision, model_version,
-            template_version, dimensions, encrypted_template, encryption_algorithm, encryption_nonce,
-            encryption_auth_tag, encryption_key_version, sample_count, aggregate_quality, status,
-            consent_id, created_at, updated_at
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+            template_version, dimensions, template_plain, encrypted_template, encryption_algorithm,
+            encryption_nonce, encryption_auth_tag, encryption_key_version, sample_count,
+            aggregate_quality, status, consent_id, created_at, updated_at
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
             faceProfileId, workspaceId, personId, provider, model, modelRevision, `${modelRevision}:${TEMPLATE_VERSION}`,
-            TEMPLATE_VERSION, embedding.length, sealed.ciphertext, sealed.algorithm, sealed.nonce,
-            sealed.authTag, sealed.keyVersion, 1, quality, 'active',
-            consentId, at, at,
+            TEMPLATE_VERSION, embedding.length, encodeTemplate(embedding), '', 'none',
+            '', '', 0, sampleCount,
+            quality, 'active', consentId, at, at,
           );
           return { ok: true, profile: api.get(faceProfileId) };
         },
@@ -79,16 +90,16 @@ export function createFaceTemplateRepository({ db, cipher = createTemplateCipher
           return db.prepare("SELECT * FROM face_templates WHERE workspace_id = ? AND status = 'active' ORDER BY created_at").all(workspaceId).map(rowToProfile);
         },
 
-        /** Decrypt one template. The ONLY path plaintext exists on, and it is server-side. */
+        /** Read one template back as a Float32Array. Server-side only. */
         openTemplate(faceProfileId) {
           const row = db.prepare('SELECT * FROM face_templates WHERE face_profile_id = ? AND workspace_id = ?').get(faceProfileId, workspaceId);
           if (!row || row.status !== 'active') return null;
           try {
-            return cipher.decrypt(
-              { algorithm: row.encryption_algorithm, keyVersion: row.encryption_key_version, nonce: row.encryption_nonce, authTag: row.encryption_auth_tag, ciphertext: row.encrypted_template },
-              { workspaceId, personId: row.person_id, profileId: row.face_profile_id },
-            );
-          } catch { return null; } // a tampered or unkeyed row identifies nobody
+            const template = decodeTemplate(row.template_plain);
+            // A malformed row identifies nobody rather than producing a vector
+            // of the wrong length that could score against anything.
+            return template && template.length === row.dimensions ? template : null;
+          } catch { return null; }
         },
 
         recordMatch(faceProfileId, similarity) {

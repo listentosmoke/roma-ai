@@ -9,7 +9,7 @@ design docs it links are accurate as of the same date.
 | Check | Result |
 |---|---|
 | Offline tests | **701/701 pass** (57 files, ~3 s, `npm test`) |
-| Facial recognition | REAL — InsightFace SCRFD+ArcFace; measured on a group photo: different people max **0.214** cosine, same face across re-encode **0.998**; live HTTP enroll→identify verified. **Consent enforcement OFF**, no liveness. |
+| Facial recognition | REAL — InsightFace SCRFD+ArcFace, flip-augmented, multi-sample enrollment. Measured: impostors max **0.216** (mean 0.041); same face survives jpeg q40 / 50% downscale / +25% brightness / 1.5px blur / 7° rotation at worst **0.951** → separation **0.735**, threshold 0.50. Live HTTP enroll→identify verified. **Consent enforcement OFF, templates unencrypted, no liveness.** |
 | Deterministic simulations | **11/11 pass** (see §10) |
 | Virtual-hardware lab | **13/13 scenarios pass** closed-loop through real Deepgram/Groq/gate/TTS/COCO-SSD on virtual `MediaStream` devices, + 17-check smoke (`verify:virtual-lab`; see [VIRTUAL-HARDWARE.md](VIRTUAL-HARDWARE.md)) |
 | Wearer + dispatch round-trip | **5/5 assertions** with the mock worker (`agent_task_dispatch_roundtrip`, 3/3 consecutive) AND with the REAL Qwen CLI (`dispatch_real_qwen_smoke`, 2/2) — spoken request → classification → dispatch → completion, no progress chatter |
@@ -17,7 +17,7 @@ design docs it links are accurate as of the same date.
 | Production build | ✓ Vite 8.0.16 — ~465 kB JS (~145 kB gzip); simulation code and worker internals proven absent from the bundle |
 | Bundle secret scan | ✓ no key values, no `node:sqlite`, no DB paths, no dev headers, no simulation markers, no worker/CLI strings |
 | Runtime | Node v24.18.0 x64 win32 (npm 11.16.0); `node:sqlite` works; Chrome 150 + Edge 150 for the lab |
-| DB schema | `0005_face_identity` (migrations idempotent; real dev DB upgraded in place, data preserved) |
+| DB schema | `0006_face_plaintext_templates` (migrations idempotent; real dev DB upgraded in place, data preserved) |
 | Live dev-server check | ✓ real Groq agent + live Deepgram voice catalog + memory write→queue→SQLite→recall, zero console errors |
 | Physical mic/camera | Software integration path **closed-loop verified virtually**; physical pass remains recommended for hardware/room calibration, required for biometric-accuracy claims ([HARDWARE-VERIFICATION.md](HARDWARE-VERIFICATION.md)) |
 

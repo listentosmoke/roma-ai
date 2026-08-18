@@ -21,3 +21,6 @@ data/*.db-*
 # virtual-hardware lab outputs (generated media cache + run reports)
 .simcache/
 .simreports/
+
+# stray scratch input, not part of the project
+transcriptfromyoutube.txt

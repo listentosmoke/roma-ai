@@ -15,15 +15,17 @@
 // IDENTITY_EVIDENCE_TYPES). There is no liveness detection: a printed
 // photograph may match.
 
-import { createFaceProvider, cosineSimilarity, EMBED_DIMS } from './provider.mjs';
+import { createFaceProvider, cosineSimilarity, averageEmbeddings, faceQuality, EMBED_DIMS } from './provider.mjs';
 import { createFaceTemplateRepository } from './templateRepository.mjs';
 
-// Measured on the pinned encoder against InsightFace's own group photo:
-// different people in one image scored max 0.214 (mean 0.033), while the same
-// face across a JPEG re-encode scored 0.998. 0.40 sits well clear of the
-// observed impostor ceiling without crowding the genuine range — but it is
-// calibrated on ONE photograph and is not an accuracy claim.
-const DEFAULT_MATCH_THRESHOLD = Number(process.env.FACE_IDENTITY_MATCH_THRESHOLD ?? 0.40);
+// Measured on the pinned encoder (flip-augmented) against InsightFace's own
+// group photograph. Impostors — six different people in one image — peaked at
+// 0.216 (mean 0.041). The same face survived jpeg q40, a 50% downscale, +25%
+// brightness, a 1.5px blur and a 7-degree rotation with a WORST score of 0.951.
+// That is a separation of 0.735, so 0.50 sits far from both populations: well
+// above anything an impostor reached, far below anything genuine lost.
+// Calibrated on one photograph, so it is a sane default, not an accuracy claim.
+const DEFAULT_MATCH_THRESHOLD = Number(process.env.FACE_IDENTITY_MATCH_THRESHOLD ?? 0.50);
 // A match must also beat the runner-up by this much, or the frame is ambiguous
 // and resolves to nobody rather than to whoever happened to score highest.
 const DEFAULT_MARGIN = Number(process.env.FACE_IDENTITY_MATCH_MARGIN ?? 0.06);
@@ -66,28 +68,46 @@ export function createFaceIdentityService({
       return { ok: true, faces: faces.map(({ score, x1, y1, x2, y2 }) => ({ score, x1, y1, x2, y2 })), count: faces.length };
     },
 
-    /** Enrol the largest face in an image against a person. */
-    async enroll({ workspaceId, personId, imageBuffer }) {
-      if (!templates.configured) return { ok: false, reasonCode: 'encryption_key_missing' };
+    /**
+     * Enrol a person from one or more images.
+     *
+     * Multiple images are averaged into a single template: one frame binds a
+     * person to one pose and one lighting condition, which is how recognition
+     * quietly gets worse the moment they turn their head.
+     */
+    async enroll({ workspaceId, personId, imageBuffer, imageBuffers = null }) {
+      const images = imageBuffers?.length ? imageBuffers : [imageBuffer];
       const consent = consentOk(workspaceId, personId);
       if (!consent.ok) return { ok: false, reasonCode: consent.reasonCode };
 
-      const faces = await provider.detect(imageBuffer);
-      if (!faces.length) return { ok: false, reasonCode: 'no_face_detected' };
-      if (faces.length > 1) return { ok: false, reasonCode: 'multiple_faces', count: faces.length };
+      const embeddings = [];
+      const rejected = [];
+      let bestQuality = 0;
+      for (const image of images) {
+        const faces = await provider.detect(image);
+        if (!faces.length) { rejected.push('no_face_detected'); continue; }
+        if (faces.length > 1) { rejected.push('multiple_faces'); continue; }
+        const quality = faceQuality(faces[0]);
+        if (!quality.ok) { rejected.push(quality.reasonCode); continue; }
+        embeddings.push(await provider.embed(image, faces[0]));
+        bestQuality = Math.max(bestQuality, faces[0].score);
+      }
+      if (!embeddings.length) return { ok: false, reasonCode: rejected[0] ?? 'no_usable_face', rejected };
 
-      const embedding = await provider.embed(imageBuffer, faces[0]);
-      if (embedding.length !== EMBED_DIMS) return { ok: false, reasonCode: 'unexpected_template_size' };
+      const template = averageEmbeddings(embeddings);
+      if (template?.length !== EMBED_DIMS) return { ok: false, reasonCode: 'unexpected_template_size' };
       const described = provider.describe();
-      return templates.forWorkspace(workspaceId).enroll({
+      const result = templates.forWorkspace(workspaceId).enroll({
         personId,
-        embedding,
+        embedding: template,
         provider: described.provider,
         model: described.repo,
         modelRevision: described.revision,
-        quality: faces[0].score,
+        quality: bestQuality,
+        sampleCount: embeddings.length,
         consentId: consent.consentId,
       });
+      return result.ok ? { ...result, samplesUsed: embeddings.length, rejected } : result;
     },
 
     /**

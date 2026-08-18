@@ -320,14 +320,74 @@ export function createFaceProvider({
         input[plane + i] = (aligned[i * 3 + 1] - 127.5) / 127.5;
         input[2 * plane + i] = (aligned[i * 3 + 2] - 127.5) / 127.5;
       }
-      const results = await recognition.run({
-        [recognition.inputNames[0]]: new ort.Tensor('float32', input, [1, 3, EMBED_SIZE, EMBED_SIZE]),
-      });
-      const raw = Object.values(results)[0].data;
-      const norm = Math.hypot(...raw) || 1;
-      return Float32Array.from(raw, (value) => value / norm);
+      // FLIP AUGMENTATION: embed the face and its mirror image, then sum
+      // before normalizing. This is what InsightFace's own reference pipeline
+      // does, and it measurably tightens genuine scores — a face is close to
+      // symmetric, so averaging both views cancels some of the pose and
+      // lighting asymmetry the encoder would otherwise carry into the vector.
+      const mirrored = new Float32Array(input.length);
+      for (let channel = 0; channel < 3; channel += 1) {
+        for (let y = 0; y < EMBED_SIZE; y += 1) {
+          for (let x = 0; x < EMBED_SIZE; x += 1) {
+            mirrored[channel * plane + y * EMBED_SIZE + x] = input[channel * plane + y * EMBED_SIZE + (EMBED_SIZE - 1 - x)];
+          }
+        }
+      }
+      const [direct, flipped] = await Promise.all([
+        recognition.run({ [recognition.inputNames[0]]: new ort.Tensor('float32', input, [1, 3, EMBED_SIZE, EMBED_SIZE]) }),
+        recognition.run({ [recognition.inputNames[0]]: new ort.Tensor('float32', mirrored, [1, 3, EMBED_SIZE, EMBED_SIZE]) }),
+      ]);
+      const a = Object.values(direct)[0].data;
+      const b = Object.values(flipped)[0].data;
+      const summed = Float32Array.from(a, (value, index) => value + b[index]);
+      const norm = Math.hypot(...summed) || 1;
+      return Float32Array.from(summed, (value) => value / norm);
     },
   };
+}
+
+/**
+ * Average several embeddings of the same face into one template.
+ *
+ * Enrolling from a single frame binds a person to one pose, one expression and
+ * one lighting condition; averaging a handful generalizes far better. Inputs
+ * are unit vectors, so the mean re-normalized is the usual centroid.
+ */
+export function averageEmbeddings(embeddings) {
+  const usable = (embeddings ?? []).filter((e) => e?.length);
+  if (!usable.length) return null;
+  const total = new Float32Array(usable[0].length);
+  for (const embedding of usable) {
+    if (embedding.length !== total.length) continue;
+    for (let i = 0; i < total.length; i += 1) total[i] += embedding[i];
+  }
+  const norm = Math.hypot(...total) || 1;
+  return Float32Array.from(total, (value) => value / norm);
+}
+
+/**
+ * Is this detection worth enrolling or matching against?
+ *
+ * A tiny or barely-detected face produces a confident-looking embedding that
+ * means very little, which is how a system starts confusing people.
+ */
+export function faceQuality(face, { minPixels = Number(process.env.FACE_IDENTITY_MIN_FACE_PX ?? 60), minScore = 0.6 } = {}) {
+  const width = face.x2 - face.x1;
+  const height = face.y2 - face.y1;
+  const size = Math.min(width, height);
+  if (face.score < minScore) return { ok: false, reasonCode: 'low_detection_confidence', size, score: face.score };
+  if (size < minPixels) return { ok: false, reasonCode: 'face_too_small', size, score: face.score };
+
+  // Crude frontality check from the 5 landmarks: on a face turned well away
+  // from the camera the nose sits far off the midpoint between the eyes.
+  const [leftEye, rightEye, nose] = face.landmarks ?? [];
+  if (leftEye && rightEye && nose) {
+    const eyeSpan = Math.hypot(rightEye[0] - leftEye[0], rightEye[1] - leftEye[1]) || 1;
+    const midX = (leftEye[0] + rightEye[0]) / 2;
+    const offset = Math.abs(nose[0] - midX) / eyeSpan;
+    if (offset > 0.55) return { ok: false, reasonCode: 'face_turned_away', size, score: face.score, offset };
+  }
+  return { ok: true, size, score: face.score };
 }
 
 /** Cosine similarity of two L2-normalized embeddings: -1..1. */
