@@ -197,7 +197,9 @@ test('the server recognizer maps a matched face onto the person track it overlap
   const recognizer = createServerFaceRecognizer({
     encodeFrame: async () => 'BASE64',
     post: async () => ({ faces: [{ box: { x1: 2, y1: 2, x2: 8, y2: 8 }, match: { personId: 'p1', similarity: 0.91 } }] }),
+    minIntervalMs: 0,
   });
+  await recognizer.identify({}, [track('t1', [0, 0, 10, 10]), track('t2', [100, 100, 110, 110])]);
   const result = await recognizer.identify({}, [track('t1', [0, 0, 10, 10]), track('t2', [100, 100, 110, 110])]);
   assert.deepEqual(result, [
     { id: 't1', identity: 'p1', confidence: 0.91 },
@@ -235,7 +237,11 @@ test('a skipped cycle keeps the previous label instead of flickering to unknown'
     now: () => clock,
   });
   const tracks = [track('t1', [0, 0, 10, 10])];
+  // Two spaced observations to confirm the identity…
+  await recognizer.identify({}, tracks);
+  clock += 2000;
   assert.equal((await recognizer.identify({}, tracks))[0].identity, 'p1');
+  // …then a throttled cycle, which must report the settled vote, not a blank.
   assert.equal((await recognizer.identify({}, tracks))[0].identity, 'p1', 'throttled cycles keep the label');
 });
 
@@ -258,4 +264,53 @@ test('recognition does not run at all when the camera or feature is off', async 
   const result = await recognizer.identify({}, [track('t1', [0, 0, 10, 10])]);
   assert.equal(calls, 0, 'a disabled recognizer must not even encode the frame');
   assert.equal(result[0].identity, null);
+});
+
+test('a single frame never names anyone — identity needs repeated agreement', async () => {
+  // Measured on a real 3 fps clip: per-frame identity is noisy, and a scene cut
+  // can put a different person in the same track. One observation is a guess.
+  const recognizer = createServerFaceRecognizer({
+    encodeFrame: async () => 'B',
+    post: async () => ({ faces: [{ box: { x1: 0, y1: 0, x2: 10, y2: 10 }, match: { personId: 'p1', similarity: 0.9 } }] }),
+    minIntervalMs: 0,
+  });
+  const tracks = [track('t1', [0, 0, 10, 10])];
+  assert.equal((await recognizer.identify({}, tracks))[0].identity, null, 'one sighting is not an identification');
+  assert.equal((await recognizer.identify({}, tracks))[0].identity, 'p1', 'two agreeing sightings are');
+});
+
+test('a confirmed identity survives one disagreeing frame but not a sustained one', async () => {
+  let personId = 'p1';
+  const recognizer = createServerFaceRecognizer({
+    encodeFrame: async () => 'B',
+    post: async () => ({ faces: [{ box: { x1: 0, y1: 0, x2: 10, y2: 10 }, match: { personId, similarity: 0.9 } }] }),
+    minIntervalMs: 0,
+  });
+  const tracks = [track('t1', [0, 0, 10, 10])];
+  await recognizer.identify({}, tracks);
+  assert.equal((await recognizer.identify({}, tracks))[0].identity, 'p1');
+
+  personId = 'p2';
+  assert.equal((await recognizer.identify({}, tracks))[0].identity, 'p1', 'one contrary frame must not rename someone');
+  await recognizer.identify({}, tracks);
+  await recognizer.identify({}, tracks);
+  const settled = await recognizer.identify({}, tracks);
+  assert.notEqual(settled[0].identity, 'p1', 'sustained disagreement does take effect');
+});
+
+test('a person who leaves is forgotten rather than remembered forever', async () => {
+  let hasFace = true;
+  const recognizer = createServerFaceRecognizer({
+    encodeFrame: async () => 'B',
+    post: async () => ({ faces: hasFace ? [{ box: { x1: 0, y1: 0, x2: 10, y2: 10 }, match: { personId: 'p1', similarity: 0.9 } }] : [] }),
+    minIntervalMs: 0,
+  });
+  const tracks = [track('t1', [0, 0, 10, 10])];
+  await recognizer.identify({}, tracks);
+  assert.equal((await recognizer.identify({}, tracks))[0].identity, 'p1');
+
+  hasFace = false;
+  await recognizer.identify({}, tracks);
+  await recognizer.identify({}, tracks);
+  assert.equal((await recognizer.identify({}, tracks))[0].identity, null, 'the label decays once the face is gone');
 });

@@ -62,24 +62,69 @@ function bestTrackForFace(box, personTracks) {
  * @param {number} [deps.minIntervalMs] floor between calls; recognition is far
  *   more expensive than detection and does not need to run every frame.
  */
-export function createServerFaceRecognizer({ encodeFrame, post, enabled = () => true, minIntervalMs = 1500, now = Date.now } = {}) {
+export function createServerFaceRecognizer({
+  encodeFrame,
+  post,
+  enabled = () => true,
+  minIntervalMs = 1500,
+  // Temporal voting. Measured on a real 3 fps video clip: per-frame identity is
+  // noisy — faces are missed on turns and blurs, and a scene cut can put a
+  // different person in the same track. Requiring agreement across observations
+  // before asserting a name, and forgetting after enough disagreement, is what
+  // turns a jittery per-frame signal into a stable one.
+  confirmAfter = 2,
+  forgetAfter = 3,
+  now = Date.now,
+} = {}) {
   let lastCallAt = 0;
   let inFlight = false;
   // Results persist between calls so tracks keep their label on the frames
   // where recognition was skipped — otherwise a name would flicker on and off.
   let lastByTrack = new Map();
+  // trackId -> { personId, hits, misses, confidence }
+  const votes = new Map();
+
+  /** Fold one observation into a track's running vote. */
+  function record(trackId, personId, confidence) {
+    const vote = votes.get(trackId) ?? { personId: null, hits: 0, misses: 0, confidence: 0 };
+    if (personId && personId === vote.personId) {
+      vote.hits += 1;
+      vote.misses = 0;
+      vote.confidence = Math.max(vote.confidence, confidence);
+    } else if (personId) {
+      // A different answer restarts the count rather than overwriting a
+      // confirmed identity on a single frame.
+      if (vote.personId && vote.hits >= confirmAfter) vote.misses += 1;
+      if (!vote.personId || vote.misses >= forgetAfter || vote.hits < confirmAfter) {
+        vote.personId = personId; vote.hits = 1; vote.misses = 0; vote.confidence = confidence;
+      }
+    } else {
+      vote.misses += 1;
+      if (vote.misses >= forgetAfter) { vote.personId = null; vote.hits = 0; vote.confidence = 0; }
+    }
+    votes.set(trackId, vote);
+    return vote;
+  }
+
+  /** Only a vote that has cleared confirmAfter is allowed to name anyone. */
+  function settled(trackId) {
+    const vote = votes.get(trackId);
+    return vote && vote.personId && vote.hits >= confirmAfter
+      ? { identity: vote.personId, confidence: vote.confidence }
+      : { identity: null, confidence: 0 };
+  }
 
   return {
     name: 'server_face_identity',
     async identify(frame, personTracks) {
       const tracks = personTracks ?? [];
-      const fallback = () => tracks.map((track) => ({
-        id: track.id,
-        identity: lastByTrack.get(track.id)?.identity ?? null,
-        confidence: lastByTrack.get(track.id)?.confidence ?? 0,
-      }));
+      // A throttled cycle reports the settled vote, not a fresh guess.
+      const fallback = () => tracks.map((track) => ({ id: track.id, ...settled(track.id) }));
 
-      if (!enabled() || !tracks.length) return tracks.map((track) => ({ id: track.id, identity: null, confidence: 0 }));
+      if (!enabled() || !tracks.length) {
+        votes.clear();
+        return tracks.map((track) => ({ id: track.id, identity: null, confidence: 0 }));
+      }
       // Never queue up: a slow server must not build a backlog of stale frames.
       if (inFlight || now() - lastCallAt < minIntervalMs) return fallback();
 
@@ -96,11 +141,16 @@ export function createServerFaceRecognizer({ encodeFrame, post, enabled = () => 
           if (track) next.set(track.id, { identity: face.match.personId, confidence: face.match.similarity });
         }
         lastByTrack = next;
-        return tracks.map((track) => ({
-          id: track.id,
-          identity: next.get(track.id)?.identity ?? null,
-          confidence: next.get(track.id)?.confidence ?? 0,
-        }));
+        // Every visible track votes this cycle — including the ones that saw
+        // nobody, so a person who walks away is eventually forgotten.
+        for (const track of tracks) {
+          const observed = next.get(track.id) ?? null;
+          record(track.id, observed?.identity ?? null, observed?.confidence ?? 0);
+        }
+        for (const trackId of [...votes.keys()]) {
+          if (!tracks.some((track) => track.id === trackId)) votes.delete(trackId);
+        }
+        return tracks.map((track) => ({ id: track.id, ...settled(track.id) }));
       } catch {
         // A recognition failure must never break perception: the scene still
         // has people in it, they are simply unidentified.
