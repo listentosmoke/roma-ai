@@ -61,7 +61,7 @@ function ScenePanel({ inspector }) {
           {scene.recentEvents.length > 0 && (
             <ul className="scene-events">
               {scene.recentEvents.slice(-3).map((e) => (
-                <li key={`${e.type}-${e.at}`}>{e.message}</li>
+                <li key={e.id ?? `${e.type}-${e.at}`}>{e.message}</li>
               ))}
             </ul>
           )}

@@ -1,6 +1,6 @@
 # Roma AI — Engineering Handoff
 
-Last reconciled: **2026-08-06**, wearer-and-server-agent phase, P3 (Claude).
+Last reconciled: **2026-08-19**, facial-recognition phase F3-F5 (Claude).
 This file is the authoritative orientation document. The per-subsystem
 design docs it links are accurate as of the same date.
 
@@ -8,8 +8,8 @@ design docs it links are accurate as of the same date.
 
 | Check | Result |
 |---|---|
-| Offline tests | **704/704 pass** (57 files, ~3 s, `npm test`) |
-| Facial recognition | REAL — InsightFace SCRFD+ArcFace, flip-augmented, multi-sample enrollment. Measured: impostors max **0.216** (mean 0.041); same face survives jpeg q40 / 50% downscale / +25% brightness / 1.5px blur / 7° rotation at worst **0.951** → separation **0.735**, threshold 0.50. Cross-photograph: obama.jpg↔obama2.jpg **0.794**, impostors ≈0; both people in two_people.jpg identified correctly. Real 3fps video: 3 distinct people separated across scene cuts. Live HTTP enroll→identify verified. **Consent enforcement OFF, templates unencrypted, no liveness.** |
+| Offline tests | **738/738 pass** (~3 s, `npm test`) |
+| Facial recognition | REAL and WIRED — InsightFace SCRFD+ArcFace server-side, enrollment from the People panel, `face_match`/`face_enrollment` evidence in the resolver, temporal voting. Measured: impostors max **0.216**; cross-photograph genuine **0.79** (server-side) and **0.77** through the live camera path; a real 3fps clip separated 3 distinct people across scene cuts. `verify:face-live` runs the whole browser leg through the virtual camera: **19/19**. **Consent enforcement OFF, templates unencrypted, no liveness — a photograph matches.** |
 | Deterministic simulations | **11/11 pass** (see §10) |
 | Virtual-hardware lab | **13/13 scenarios pass** closed-loop through real Deepgram/Groq/gate/TTS/COCO-SSD on virtual `MediaStream` devices, + 17-check smoke (`verify:virtual-lab`; see [VIRTUAL-HARDWARE.md](VIRTUAL-HARDWARE.md)) |
 | Wearer + dispatch round-trip | **5/5 assertions** with the mock worker (`agent_task_dispatch_roundtrip`, 3/3 consecutive) AND with the REAL Qwen CLI (`dispatch_real_qwen_smoke`, 2/2) — spoken request → classification → dispatch → completion, no progress chatter |
@@ -17,7 +17,7 @@ design docs it links are accurate as of the same date.
 | Production build | ✓ Vite 8.0.16 — ~465 kB JS (~145 kB gzip); simulation code and worker internals proven absent from the bundle |
 | Bundle secret scan | ✓ no key values, no `node:sqlite`, no DB paths, no dev headers, no simulation markers, no worker/CLI strings |
 | Runtime | Node v24.18.0 x64 win32 (npm 11.16.0); `node:sqlite` works; Chrome 150 + Edge 150 for the lab |
-| DB schema | `0006_face_plaintext_templates` (migrations idempotent; real dev DB upgraded in place, data preserved) |
+| DB schema | `0007_face_evidence` (migrations idempotent; real dev DB upgraded in place, data preserved) |
 | Live dev-server check | ✓ real Groq agent + live Deepgram voice catalog + memory write→queue→SQLite→recall, zero console errors |
 | Physical mic/camera | Software integration path **closed-loop verified virtually**; physical pass remains recommended for hardware/room calibration, required for biometric-accuracy claims ([HARDWARE-VERIFICATION.md](HARDWARE-VERIFICATION.md)) |
 
@@ -31,14 +31,18 @@ Environment quirks of this dev box:
   background tasks run the real CLI in normal dev sessions (tests still force
   the mock). The worker uses a private `QWEN_HOME` and does **not** use the
   personal credentials in `~/.qwen`.
-- `ffmpeg` is **not installed**. Only `scripts/stream.mjs` and fresh-clip
-  extraction in `simulate:voice-identity` want it (the latter falls back to
-  cached `.testdata/*.pcm` fixtures automatically).
+- `ffmpeg` **is** installed (9.0, gyan.dev build). Only `scripts/stream.mjs`
+  and fresh-clip extraction in `simulate:voice-identity` want it (the latter
+  falls back to cached `.testdata/*.pcm` fixtures without it).
 - The user's `.env` still uses legacy `VITE_DEEPGRAM_API_KEY`/`VITE_GROQ_API_KEY`
   names — accepted with a startup rename warning; keys are NOT leaked to the
   bundle (verified — no client file references them, so Vite never inlines).
-- `BIOMETRIC_ENCRYPTION_KEY` is not set in `.env` — voice identity currently
-  fails closed on this machine (by design; set it per `.env.example`).
+- `BIOMETRIC_ENCRYPTION_KEY` **is** set in `.env` (a simple dev placeholder,
+  meant to be replaced). It was reported as missing until 2026-08-19 because
+  the voice cipher read `process.env` while the key lives in `.env`, which
+  Vite does not load into `process.env` — so voice identity had been failing
+  closed for a configuration that was correct. `/api/voice/status` now
+  reports `encryption: ready`.
 
 ## 2. Architecture and data flow
 
@@ -258,13 +262,18 @@ write→queue→SQLite→recall loop (zero console errors).
 
 ## 12. Known mocks, placeholders, heuristics
 
-Face identification (placeholder returns nobody) · scene interpreter
-(templates) · COCO-SSD 80 generic classes · greedy-IoU tracking · keyword
+Scene interpreter (templates) · COCO-SSD 80 generic classes ·
+greedy-IoU tracking · keyword
 (not semantic) memory retrieval · lexical echo/dedup detection ·
 quiet-gap heuristic for `speak_when_convenient` · heuristic VAD/overlap
 in voice capture · exact-fingerprint replay check (not liveness) ·
 in-process rate limiting · dev-mode auth principal · the **mock worker is the
 default** background engine (real work needs `AGENT_WORKER=qwen`).
+
+Face identification is no longer in this list — it is real (§1) — but note two
+couplings it inherits: recognition only runs on tracks COCO-SSD has already
+called a person, so a face with no person detection around it is never looked
+up; and there is no liveness check at all.
 
 ## 13. Known limitations
 
@@ -275,7 +284,10 @@ cancellation; single active task; `GET /api/audit` dev-only; the client
 policy pass is defense-in-depth (the hard boundary is server-side); one
 background engineering task at a time, whose write mode auto-approves shell
 commands inside its isolated worktree (the isolation is the worktree plus the
-wearer's approval, not a sandbox — [AGENT-ENV.md](AGENT-ENV.md)).
+wearer's approval, not a sandbox — [AGENT-ENV.md](AGENT-ENV.md)); face
+consent enforcement is OFF, face templates are unencrypted at rest (behind
+full-disk encryption, migration 0006), and face accuracy is calibrated on
+public photographs with demographic performance unmeasured here.
 
 ## 14. Worktree state and commit plan
 
@@ -308,22 +320,43 @@ include it. Do **not** commit without explicit authorization.
 
 ## 15. Exact next phase
 
-Facial recognition was explicitly deferred until after stabilization, the
-virtual-hardware lab, and the wearer/server-agent phase. All three are done
-(P1 wearer-centric perception, P2 task dispatch, P3 real Qwen worker — see
-[PLAN-WEARER-AND-SERVER-AGENT.md](PLAN-WEARER-AND-SERVER-AGENT.md) and
-[AGENT-ENV.md](AGENT-ENV.md)). Before starting it: (1) make the
-baseline commit above; (2) set `BIOMETRIC_ENCRYPTION_KEY` in `.env` so voice
-identity runs for real in normal dev sessions; (3) optionally run the
-physical checklist for hardware calibration. The face phase then follows the
-already-prepared extension points — a face provider mirroring
-`voiceProvider.js`'s interface, `future_face_match` evidence through the
-existing resolver, `faceProfileIds` on the person schema, consent +
-sensitivity + encrypted-template patterns identical to voice — and should be
-developed AGAINST the virtual lab from day one: rendered/licensed face
-assets in the video engine, enrollment-consent scenarios, cross-modal
-face+voice timing, and photo-replay adversarial cases (see
-[VIRTUAL-HARDWARE.md](VIRTUAL-HARDWARE.md) "Toward facial recognition").
-Two smaller increments also queued: automating the People-panel voice-
-enrollment click-through inside the lab, and fixing the React duplicate-key
-warning the lab surfaced during camera sessions.
+Facial recognition is **built and verified** (F1-F4 done, F5 partly — see
+[PLAN-FACE-IDENTITY.md](PLAN-FACE-IDENTITY.md)): a local InsightFace encoder
+server-side, plaintext templates behind full-disk encryption, `face_match` /
+`face_enrollment` evidence in the resolver, enrollment from the People panel,
+and `npm run verify:face-live` driving the whole browser leg through the
+virtual camera with real models (19 checks).
+
+Read this before extending it — it is the non-obvious part:
+
+> The camera is **worn** and looks outward, so the wearer is essentially never
+> in frame. A face answers "who is **present**"; `resolve()` asks "who is
+> **speaking**". Face evidence therefore corroborates or contradicts a voice
+> match and is otherwise recorded as presence. It never resolves a speaker on
+> its own, never breaks a voice tie, and never outranks something a human
+> actually said. `face_match` ranks below `voice_match` for that reason.
+
+What is actually left, in order:
+
+1. **Physical hardware verification** — still the largest gap, and now the
+   gating one for any accuracy claim. `HARDWARE-VERIFICATION.md` is the
+   checklist; face accuracy is calibrated on public photographs, and
+   demographic performance is unmeasured here.
+2. **Consent enforcement for faces** is OFF (`FACE_IDENTITY_REQUIRE_CONSENT=1`
+   restores it). The column, the checks, and the revocation path all exist —
+   turning it on is configuration, then lab scenarios for
+   enrollment-with-consent and revocation become writable.
+3. **Cross-modal face+voice timing in the lab.** The resolver logic is unit
+   tested; the timing under a real conversation is not.
+4. **Automating the People-panel voice-enrollment click-through** in the lab,
+   the way face enrollment now is.
+
+Two lessons from this phase worth carrying forward:
+
+- The face/track association bug (`e4ce2dc`) was invisible to unit tests
+  because the test invented a shape the tracker never produces. **When two
+  subsystems meet, test the seam with the real thing on both sides**, or the
+  mock will simply agree with the mistake.
+- The live verification initially reported a cross-photograph similarity of
+  ~1.00 and looked like a pass. It was measuring the enrollment image again.
+  A check that passes for the wrong reason is worse than one that fails.

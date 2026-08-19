@@ -28,6 +28,7 @@ export function createSceneStore({ maxEvents = 20, eventCooldownMs = 8000, maxKe
   let state = emptySceneState();
   const listeners = new Set();
   const lastEventAt = new Map(); // `${type}:${key}` -> epoch ms, for dedup/rate-limiting
+  let eventCounter = 0;
 
   function notify() {
     for (const listener of listeners) listener(state);
@@ -38,7 +39,12 @@ export function createSceneStore({ maxEvents = 20, eventCooldownMs = 8000, maxKe
     const last = lastEventAt.get(dedupKey);
     if (last !== undefined && at - last < eventCooldownMs) return;
     lastEventAt.set(dedupKey, at);
-    state.recentEvents = [...state.recentEvents, { at, type, message }].slice(-maxEvents);
+    eventCounter += 1;
+    // Events carry their own identity. Two people entering in the same frame
+    // produce two events of the same type at the same millisecond, so
+    // type+timestamp does not identify one — which is what made React warn
+    // about duplicate keys during camera sessions.
+    state.recentEvents = [...state.recentEvents, { id: `scene_event_${at}_${eventCounter}`, at, type, message }].slice(-maxEvents);
   }
 
   function diffAndPromote(previous, next, at) {

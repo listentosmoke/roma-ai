@@ -140,3 +140,21 @@ test('inspector pipeline: scripted frames end up as live scene state with metric
   assert.equal(inspector.metrics().cycles, 2);
   assert.ok(inspector.metrics().averageMs.cycle >= 0);
 });
+
+test('two people entering in the same frame produce distinguishable events', () => {
+  // They share a type and a timestamp, so type+time cannot identify one —
+  // which is what made React warn about duplicate keys in the scene panel.
+  const store = createSceneStore();
+  store.update({ objects: [], people: [], sceneLabel: 'room', summary: '' }, 1000);
+  store.update({
+    objects: [],
+    people: [{ id: 'track_1', identity: null, confidence: 0, lastSeenAt: 2000 }, { id: 'track_2', identity: null, confidence: 0, lastSeenAt: 2000 }],
+    sceneLabel: 'room',
+    summary: '',
+  }, 2000);
+
+  const entered = store.getState().recentEvents.filter((e) => e.type === 'person-entered');
+  assert.equal(entered.length, 2);
+  assert.equal(new Set(entered.map((e) => e.id)).size, 2, 'each event identifies itself');
+  assert.equal(entered[0].at, entered[1].at, 'same millisecond — the id is what separates them');
+});
