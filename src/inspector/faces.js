@@ -47,16 +47,54 @@ export function createFaceRecognizer({ lookup } = {}) {
   };
 }
 
+/**
+ * The two halves of this pipeline describe boxes differently, and getting it
+ * wrong is silent rather than loud — every association simply fails and
+ * nobody is ever recognised.
+ *
+ *   person tracks (src/inspector/tracker.js) — { x, y, width, height },
+ *                                              NORMALIZED to 0..1
+ *   face boxes    (server/faceIdentity)      — { x1, y1, x2, y2},
+ *                                              PIXELS of the submitted frame
+ *
+ * So both are converted to normalized corners before they are compared.
+ */
+function toCorners(box) {
+  if (!box) return null;
+  if (Array.isArray(box)) return box.length === 4 ? box : null;
+  if (box.x2 != null && box.x1 != null) return [box.x1, box.y1, box.x2, box.y2];
+  if (box.width != null && box.x != null) return [box.x, box.y, box.x + box.width, box.y + box.height];
+  return null;
+}
+
+/** Pixel dimensions of the frame the face boxes were measured against. */
+function frameSize(frame) {
+  const width = frame?.width ?? frame?.canvas?.width ?? frame?.video?.videoWidth ?? 0;
+  const height = frame?.height ?? frame?.canvas?.height ?? frame?.video?.videoHeight ?? 0;
+  return width > 0 && height > 0 ? { width, height } : null;
+}
+
 /** Largest-overlap association between a detected face box and a person track. */
-function bestTrackForFace(box, personTracks) {
+function bestTrackForFace(faceBox, personTracks, frame) {
+  const corners = toCorners(faceBox);
+  if (!corners) return null;
+  const size = frameSize(frame);
+  // Without frame dimensions the two coordinate spaces cannot be reconciled.
+  // Boxes already inside the unit square are taken as normalized; anything
+  // else is refused rather than associated by accident.
+  const withinUnit = corners.every((value) => Number.isFinite(value) && value >= 0 && value <= 1);
+  if (!size && !withinUnit) return null;
+  const [fx1, fy1, fx2, fy2] = size
+    ? [corners[0] / size.width, corners[1] / size.height, corners[2] / size.width, corners[3] / size.height]
+    : corners;
+
   let best = null;
   let bestArea = 0;
   for (const track of personTracks ?? []) {
-    const b = track.bbox ?? track.box ?? null;
-    if (!b) continue;
-    const [tx1, ty1, tx2, ty2] = Array.isArray(b) ? b : [b.x1, b.y1, b.x2, b.y2];
-    const overlap = Math.max(0, Math.min(box.x2, tx2) - Math.max(box.x1, tx1))
-      * Math.max(0, Math.min(box.y2, ty2) - Math.max(box.y1, ty1));
+    const t = toCorners(track.box ?? track.bbox ?? null);
+    if (!t) continue;
+    const overlap = Math.max(0, Math.min(fx2, t[2]) - Math.max(fx1, t[0]))
+      * Math.max(0, Math.min(fy2, t[3]) - Math.max(fy1, t[1]));
     if (overlap > bestArea) { bestArea = overlap; best = track; }
   }
   return bestArea > 0 ? best : null;
@@ -171,7 +209,7 @@ export function createServerFaceRecognizer({
         const next = new Map();
         for (const face of response?.faces ?? []) {
           if (!face.match) continue;
-          const track = bestTrackForFace(face.box, tracks);
+          const track = bestTrackForFace(face.box, tracks, frame);
           if (!track) continue;
           next.set(track.id, {
             personId: face.match.personId,

@@ -186,22 +186,32 @@ test('cosine similarity is bounded, symmetric, and 1 for an identical vector', (
 
 import { createFaceRecognizer, createServerFaceRecognizer } from '../src/inspector/faces.js';
 
-const track = (id, box) => ({ id, bbox: box });
+// The REAL shapes this pipeline uses, which is the point: person tracks come
+// from src/inspector/tracker.js as NORMALIZED {x,y,width,height}, while face
+// boxes come back from the server in PIXELS of the submitted frame. An earlier
+// version of this file invented a track shape the tracker never produces, and
+// hid a bug where no face could ever be associated with anybody.
+const FRAME = { width: 640, height: 480 };
+const track = (id, box) => ({ id, box });
+const LEFT_HALF = { x: 0, y: 0, width: 0.5, height: 1 };
+const RIGHT_EDGE = { x: 0.9, y: 0.9, width: 0.1, height: 0.1 };
+/** A face in the left half of a 640x480 frame, in server pixel coordinates. */
+const FACE_PIXELS = { x1: 96, y1: 96, x2: 224, y2: 288 };
 
 test('the default recognizer still labels nobody, honestly', async () => {
-  const result = await createFaceRecognizer().identify({}, [track('t1', [0, 0, 10, 10])]);
+  const result = await createFaceRecognizer().identify(FRAME, [track('t1', LEFT_HALF)]);
   assert.deepEqual(result, [{ id: 't1', identity: null, personId: null, faceProfileId: null, confidence: 0, quality: 0 }]);
 });
 
 test('the server recognizer maps a matched face onto the person track it overlaps', async () => {
   const recognizer = createServerFaceRecognizer({
     encodeFrame: async () => 'BASE64',
-    post: async () => ({ faces: [{ box: { x1: 2, y1: 2, x2: 8, y2: 8 }, match: { personId: 'p1', faceProfileId: 'fp1', similarity: 0.91 }, quality: { ok: true, value: 0.88 } }] }),
+    post: async () => ({ faces: [{ box: FACE_PIXELS, match: { personId: 'p1', faceProfileId: 'fp1', similarity: 0.91 }, quality: { ok: true, value: 0.88 } }] }),
     describePerson: (id) => (id === 'p1' ? 'Matt' : null),
     minIntervalMs: 0,
   });
-  await recognizer.identify({}, [track('t1', [0, 0, 10, 10]), track('t2', [100, 100, 110, 110])]);
-  const result = await recognizer.identify({}, [track('t1', [0, 0, 10, 10]), track('t2', [100, 100, 110, 110])]);
+  await recognizer.identify(FRAME, [track('t1', LEFT_HALF), track('t2', RIGHT_EDGE)]);
+  const result = await recognizer.identify(FRAME, [track('t1', LEFT_HALF), track('t2', RIGHT_EDGE)]);
   assert.deepEqual(result, [
     { id: 't1', identity: 'Matt', personId: 'p1', faceProfileId: 'fp1', confidence: 0.91, quality: 0.88 },
     { id: 't2', identity: null, personId: null, faceProfileId: null, confidence: 0, quality: 0 },
@@ -213,18 +223,18 @@ test('recognition is throttled and never queues a backlog of stale frames', asyn
   let clock = 10_000;
   const recognizer = createServerFaceRecognizer({
     encodeFrame: async () => 'BASE64',
-    post: async () => { calls += 1; return { faces: [{ box: { x1: 0, y1: 0, x2: 10, y2: 10 }, match: { personId: 'p1', similarity: 0.9 } }] }; },
+    post: async () => { calls += 1; return { faces: [{ box: FACE_PIXELS, match: { personId: 'p1', similarity: 0.9 } }] }; },
     minIntervalMs: 1500,
     now: () => clock,
   });
-  const tracks = [track('t1', [0, 0, 10, 10])];
-  await recognizer.identify({}, tracks);
-  await recognizer.identify({}, tracks);
-  await recognizer.identify({}, tracks);
+  const tracks = [track('t1', LEFT_HALF)];
+  await recognizer.identify(FRAME, tracks);
+  await recognizer.identify(FRAME, tracks);
+  await recognizer.identify(FRAME, tracks);
   assert.equal(calls, 1, 'three cycles inside the interval make one request');
 
   clock += 2000;
-  const later = await recognizer.identify({}, tracks);
+  const later = await recognizer.identify(FRAME, tracks);
   assert.equal(calls, 2);
   assert.equal(later[0].personId, 'p1');
 });
@@ -233,17 +243,17 @@ test('a skipped cycle keeps the previous label instead of flickering to unknown'
   let clock = 10_000;
   const recognizer = createServerFaceRecognizer({
     encodeFrame: async () => 'BASE64',
-    post: async () => ({ faces: [{ box: { x1: 0, y1: 0, x2: 10, y2: 10 }, match: { personId: 'p1', similarity: 0.9 } }] }),
+    post: async () => ({ faces: [{ box: FACE_PIXELS, match: { personId: 'p1', similarity: 0.9 } }] }),
     minIntervalMs: 1500,
     now: () => clock,
   });
-  const tracks = [track('t1', [0, 0, 10, 10])];
+  const tracks = [track('t1', LEFT_HALF)];
   // Two spaced observations to confirm the identity…
-  await recognizer.identify({}, tracks);
+  await recognizer.identify(FRAME, tracks);
   clock += 2000;
-  assert.equal((await recognizer.identify({}, tracks))[0].personId, 'p1');
+  assert.equal((await recognizer.identify(FRAME, tracks))[0].personId, 'p1');
   // …then a throttled cycle, which must report the settled vote, not a blank.
-  assert.equal((await recognizer.identify({}, tracks))[0].personId, 'p1', 'throttled cycles keep the label');
+  assert.equal((await recognizer.identify(FRAME, tracks))[0].personId, 'p1', 'throttled cycles keep the label');
 });
 
 test('a server failure degrades to unidentified, never breaking perception', async () => {
@@ -251,7 +261,7 @@ test('a server failure degrades to unidentified, never breaking perception', asy
     encodeFrame: async () => 'BASE64',
     post: async () => { throw new Error('offline'); },
   });
-  const result = await recognizer.identify({}, [track('t1', [0, 0, 10, 10])]);
+  const result = await recognizer.identify(FRAME, [track('t1', LEFT_HALF)]);
   assert.deepEqual(result, [{ id: 't1', identity: null, personId: null, faceProfileId: null, confidence: 0, quality: 0 }]);
 });
 
@@ -262,7 +272,7 @@ test('recognition does not run at all when the camera or feature is off', async 
     post: async () => ({ faces: [] }),
     enabled: () => false,
   });
-  const result = await recognizer.identify({}, [track('t1', [0, 0, 10, 10])]);
+  const result = await recognizer.identify(FRAME, [track('t1', LEFT_HALF)]);
   assert.equal(calls, 0, 'a disabled recognizer must not even encode the frame');
   assert.equal(result[0].identity, null);
 });
@@ -272,30 +282,30 @@ test('a single frame never names anyone — identity needs repeated agreement', 
   // can put a different person in the same track. One observation is a guess.
   const recognizer = createServerFaceRecognizer({
     encodeFrame: async () => 'B',
-    post: async () => ({ faces: [{ box: { x1: 0, y1: 0, x2: 10, y2: 10 }, match: { personId: 'p1', similarity: 0.9 } }] }),
+    post: async () => ({ faces: [{ box: FACE_PIXELS, match: { personId: 'p1', similarity: 0.9 } }] }),
     minIntervalMs: 0,
   });
-  const tracks = [track('t1', [0, 0, 10, 10])];
-  assert.equal((await recognizer.identify({}, tracks))[0].personId, null, 'one sighting is not an identification');
-  assert.equal((await recognizer.identify({}, tracks))[0].personId, 'p1', 'two agreeing sightings are');
+  const tracks = [track('t1', LEFT_HALF)];
+  assert.equal((await recognizer.identify(FRAME, tracks))[0].personId, null, 'one sighting is not an identification');
+  assert.equal((await recognizer.identify(FRAME, tracks))[0].personId, 'p1', 'two agreeing sightings are');
 });
 
 test('a confirmed identity survives one disagreeing frame but not a sustained one', async () => {
   let personId = 'p1';
   const recognizer = createServerFaceRecognizer({
     encodeFrame: async () => 'B',
-    post: async () => ({ faces: [{ box: { x1: 0, y1: 0, x2: 10, y2: 10 }, match: { personId, similarity: 0.9 } }] }),
+    post: async () => ({ faces: [{ box: FACE_PIXELS, match: { personId, similarity: 0.9 } }] }),
     minIntervalMs: 0,
   });
-  const tracks = [track('t1', [0, 0, 10, 10])];
-  await recognizer.identify({}, tracks);
-  assert.equal((await recognizer.identify({}, tracks))[0].personId, 'p1');
+  const tracks = [track('t1', LEFT_HALF)];
+  await recognizer.identify(FRAME, tracks);
+  assert.equal((await recognizer.identify(FRAME, tracks))[0].personId, 'p1');
 
   personId = 'p2';
-  assert.equal((await recognizer.identify({}, tracks))[0].personId, 'p1', 'one contrary frame must not rename someone');
-  await recognizer.identify({}, tracks);
-  await recognizer.identify({}, tracks);
-  const settled = await recognizer.identify({}, tracks);
+  assert.equal((await recognizer.identify(FRAME, tracks))[0].personId, 'p1', 'one contrary frame must not rename someone');
+  await recognizer.identify(FRAME, tracks);
+  await recognizer.identify(FRAME, tracks);
+  const settled = await recognizer.identify(FRAME, tracks);
   assert.notEqual(settled[0].personId, 'p1', 'sustained disagreement does take effect');
 });
 
@@ -303,17 +313,17 @@ test('a person who leaves is forgotten rather than remembered forever', async ()
   let hasFace = true;
   const recognizer = createServerFaceRecognizer({
     encodeFrame: async () => 'B',
-    post: async () => ({ faces: hasFace ? [{ box: { x1: 0, y1: 0, x2: 10, y2: 10 }, match: { personId: 'p1', similarity: 0.9 } }] : [] }),
+    post: async () => ({ faces: hasFace ? [{ box: FACE_PIXELS, match: { personId: 'p1', similarity: 0.9 } }] : [] }),
     minIntervalMs: 0,
   });
-  const tracks = [track('t1', [0, 0, 10, 10])];
-  await recognizer.identify({}, tracks);
-  assert.equal((await recognizer.identify({}, tracks))[0].personId, 'p1');
+  const tracks = [track('t1', LEFT_HALF)];
+  await recognizer.identify(FRAME, tracks);
+  assert.equal((await recognizer.identify(FRAME, tracks))[0].personId, 'p1');
 
   hasFace = false;
-  await recognizer.identify({}, tracks);
-  await recognizer.identify({}, tracks);
-  assert.equal((await recognizer.identify({}, tracks))[0].personId, null, 'the label decays once the face is gone');
+  await recognizer.identify(FRAME, tracks);
+  await recognizer.identify(FRAME, tracks);
+  assert.equal((await recognizer.identify(FRAME, tracks))[0].personId, null, 'the label decays once the face is gone');
 });
 
 // ── enrollment capture (the pure half of the People-panel flow) ─────────────
@@ -374,4 +384,49 @@ test('the enrollment summary says what was dropped and why', () => {
   );
   assert.match(summarizeEnrollment({ ok: false, reasonCode: 'face_too_small' }), /too far from the camera.*Nothing was stored/);
   assert.match(summarizeEnrollment(null), /did not complete/);
+});
+
+// ── the association bug this file once hid ─────────────────────────────────
+
+import { createTracker } from '../src/inspector/tracker.js';
+
+test('a face is associated with a track produced by the REAL tracker, not an invented shape', async () => {
+  // This is the end of the browser leg: COCO-SSD -> tracker -> face box from
+  // the server -> the right person on the right track. It failed silently
+  // before, because the two halves measure boxes in different units and
+  // nothing compared them for real.
+  const tracker = createTracker();
+  const tracks = tracker.update([
+    { label: 'person', confidence: 0.9, box: { x: 0.05, y: 0.1, width: 0.4, height: 0.8 } },
+    { label: 'person', confidence: 0.9, box: { x: 0.6, y: 0.1, width: 0.35, height: 0.8 } },
+  ], 1000).filter((t) => t.label === 'person');
+  assert.equal(tracks.length, 2);
+
+  const recognizer = createServerFaceRecognizer({
+    encodeFrame: async () => 'BASE64',
+    // A face in the LEFT person's head region, in pixels of a 640x480 frame.
+    post: async () => ({ faces: [{ box: { x1: 130, y1: 60, x2: 220, y2: 170 }, match: { personId: 'p_left', faceProfileId: 'fp', similarity: 0.9 }, quality: { ok: true, value: 0.9 } }] }),
+    minIntervalMs: 0,
+  });
+
+  await recognizer.identify(FRAME, tracks);
+  const result = await recognizer.identify(FRAME, tracks);
+  const left = result.find((r) => r.id === tracks[0].id);
+  const right = result.find((r) => r.id === tracks[1].id);
+  assert.equal(left.personId, 'p_left', 'the face landed on the person it overlaps');
+  assert.equal(right.personId, null, 'and not on the other person in frame');
+});
+
+test('a face box that cannot be placed in the frame is refused, not guessed at', async () => {
+  const recognizer = createServerFaceRecognizer({
+    encodeFrame: async () => 'BASE64',
+    post: async () => ({ faces: [{ box: { x1: 96, y1: 96, x2: 224, y2: 288 }, match: { personId: 'p1', similarity: 0.9 }, quality: { ok: true, value: 0.9 } }] }),
+    minIntervalMs: 0,
+  });
+  const tracks = [track('t1', LEFT_HALF)];
+  // No frame dimensions: pixel coordinates cannot be reconciled with
+  // normalized ones, and a wrong association is worse than none.
+  await recognizer.identify({}, tracks);
+  const result = await recognizer.identify({}, tracks);
+  assert.equal(result[0].personId, null);
 });
