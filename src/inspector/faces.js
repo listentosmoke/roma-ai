@@ -28,6 +28,27 @@
 // A match is EVIDENCE, never authentication, and there is no liveness check —
 // a printed photograph may match. See PLAN-FACE-IDENTITY.md.
 
+/**
+ * Turn the Inspector's scene people into bounded face observations for the
+ * identity resolver (src/identity/resolver.js). Only tracks the recognizer has
+ * actually settled on carry a personId, so this is a short list of confirmed
+ * sightings — no image, no embedding, nothing per-frame.
+ *
+ * Shared by the agent runtime (per turn) and the voice-identity result handler
+ * (per resolution), because both must apply the SAME cross-modal rule and two
+ * copies of this would drift.
+ */
+export function faceObservationsFromScene(state) {
+  return (state?.people ?? [])
+    .filter((person) => person.personId)
+    .map((person) => ({
+      personId: person.personId,
+      faceProfileId: person.faceProfileId ?? null,
+      similarity: person.confidence ?? 0,
+      quality: person.quality ?? 0,
+    }));
+}
+
 export function createFaceRecognizer({ lookup } = {}) {
   return {
     name: lookup ? 'scripted' : 'placeholder',

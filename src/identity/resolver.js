@@ -485,14 +485,59 @@ export function createEntityResolver({ repository, voiceProvider = null, now = D
    * output, creates evidence, or upgrades a person; it only mirrors validated
    * session continuity into the browser runtime so the next Context Compiler
    * pass can use the safe person/evidence references.
+   *
+   * THIS is where real voice identity arrives. `resolve()`'s voice branch is
+   * only reachable in tests and simulation, because the browser has no bounded
+   * raw-audio pipeline (see identity/voiceProvider.js) — so the cross-modal
+   * rule has to be applied here too, or it would be true in tests and false in
+   * the running app. A confident face on somebody ELSE blocks the adoption
+   * rather than silently overriding the camera.
    */
-  function acceptServerResolution({ sessionId, speakerLabel, personId, evidenceIds = [], status, reasonCode = 'voice_profile_similarity', time = now() } = {}) {
+  function acceptServerResolution({ sessionId, speakerLabel, personId, evidenceIds = [], status, reasonCode = 'voice_profile_similarity', faceObservations = [], interactionId = null, turnId = null, time = now() } = {}) {
     if (status !== 'resolved' || !sessionId || !speakerLabel || !personId || !evidenceIds.length) return { ok: false, reasonCode: 'invalid_server_resolution' };
     const person = repository.getPerson(personId);
     if (!person || person.status !== 'active') return { ok: false, reasonCode: 'person_not_found' };
-    if (getRejected(sessionId, speakerLabel).has(personId)) return { ok: false, reasonCode: 'manual_rejection_preserved' };
-    setContinuity(sessionId, speakerLabel, personId, time, evidenceIds.slice(0, 4));
-    return { ok: true, status: 'resolved', personId, speakerLabel, evidenceIds: evidenceIds.slice(0, 4), reasonCode };
+    const rejected = getRejected(sessionId, speakerLabel);
+    if (rejected.has(personId)) return { ok: false, reasonCode: 'manual_rejection_preserved' };
+
+    const faces = normalizeFaceObservations(faceObservations, rejected, resolutionThresholds);
+    const strongFaces = faces.filter((f) => f.similarity >= resolutionThresholds.strongFaceMatch);
+    const corroborating = strongFaces.find((f) => f.personId === personId) ?? null;
+    const contradicting = !corroborating && strongFaces.length ? strongFaces[0] : null;
+
+    function addFaceEvidence(face, decision, faceReasonCode) {
+      return repository.addEvidence({
+        evidenceType: 'face_match', personId: face.personId, speakerLabel, sessionId, interactionId, turnId,
+        faceProfileId: face.faceProfileId, provider: face.provider, providerModel: face.providerModel,
+        score: face.similarity, confidence: face.similarity, quality: face.quality, decision, reasonCode: faceReasonCode,
+      }).evidence.evidenceId;
+    }
+
+    if (contradicting) {
+      const faceEvidenceIds = strongFaces.map((face) => addFaceEvidence(face, 'candidate', 'cross_modal_disagreement'));
+      return {
+        ok: false,
+        reasonCode: 'cross_modal_disagreement',
+        personId: null,
+        speakerLabel,
+        contradictedBy: contradicting.personId,
+        evidenceIds: faceEvidenceIds,
+        requiresConfirmation: true,
+      };
+    }
+
+    const accepted = evidenceIds.slice(0, 4);
+    if (corroborating) accepted.push(addFaceEvidence(corroborating, 'resolved', 'cross_modal_agreement'));
+    setContinuity(sessionId, speakerLabel, personId, time, accepted);
+    return {
+      ok: true,
+      status: 'resolved',
+      personId,
+      speakerLabel,
+      evidenceIds: accepted,
+      reasonCode: corroborating ? 'cross_modal_agreement' : reasonCode,
+      presentPersonIds: faces.map((f) => f.personId),
+    };
   }
 
   return {

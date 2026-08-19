@@ -23,6 +23,7 @@
 
 import { now, toEpochMs } from '../clock.js';
 import { compileSceneSnapshot, isStale, STALE_AFTER_MS } from '../context/compiler.js';
+import { faceObservationsFromScene } from '../inspector/faces.js';
 import { assembleContext } from './prompt.js';
 import { validateDecision, validateTaskUpdate, AGENT_DECISION_JSON_SCHEMA } from './schema.js';
 import { createProvider } from './provider.js';
@@ -200,23 +201,6 @@ export function createAgentRuntime({
   }
 
   // ── new pipeline ─────────────────────────────────────────────────────────────
-
-  /**
-   * Bounded face observations for the identity resolver, taken from the scene
-   * state the Inspector already maintains. Only tracks the recognizer has
-   * actually settled on carry a personId, so this is a short list of confirmed
-   * sightings — no image, no embedding, nothing per-frame.
-   */
-  function faceObservationsFrom(state) {
-    return (state?.people ?? [])
-      .filter((person) => person.personId)
-      .map((person) => ({
-        personId: person.personId,
-        faceProfileId: person.faceProfileId ?? null,
-        similarity: person.confidence ?? 0,
-        quality: person.quality ?? 0,
-      }));
-  }
 
   function currentSceneInfo(at) {
     const state = sceneStore?.getState?.() ?? null;
@@ -428,7 +412,7 @@ export function createAgentRuntime({
           // presence, not speech (see its header): it corroborates or
           // contradicts a voice match and otherwise only records that someone
           // was there. Empty whenever the camera is off.
-          faceObservations: faceObservationsFrom(sceneInfoAtStart.state),
+          faceObservations: faceObservationsFromScene(sceneInfoAtStart.state),
           time: currentTurn.at,
         });
         needsSpeakerResolution = false;

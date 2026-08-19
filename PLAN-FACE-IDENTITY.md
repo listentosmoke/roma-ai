@@ -160,9 +160,20 @@ Fixtures are recordings and photographs of real people and are NOT committed:
 `npm run fetch:face-fixtures` pulls them into a gitignored directory, and the
 verification skips with instructions if they are absent.
 
+Cross-modal face+voice turned out to need a fix before it could be tested at
+all: the agreement/disagreement logic lived only in `resolve()`, whose voice
+branch **cannot run in the browser** (no bounded raw-audio pipeline, so
+`voiceSampleRef` is always null). Real voice matches arrive through
+`acceptServerResolution`, which never consulted the camera — so the documented
+rule was true in unit tests and false in the running app. That path now applies
+it: a confident face on someone else refuses the adoption instead of being
+silently overruled.
+
 **Still open:** consent-enrollment and revocation scenarios (consent
-enforcement is off in this build, so there is nothing to assert yet), and
-cross-modal face+voice timing in the lab.
+enforcement is off in this build, so there is nothing to assert yet), and a lab
+scenario that drives voice and face together through a real conversation —
+which additionally needs the People-panel voice-enrollment click-through
+automated the way face enrollment now is.
 
 ## Honest limits, stated up front
 

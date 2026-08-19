@@ -10,6 +10,7 @@ import { useMemory } from './useMemory.js';
 import { usePeople } from './usePeople.js';
 import { useVoiceIdentity } from './useVoiceIdentity.js';
 import { useFaceIdentity } from './useFaceIdentity.js';
+import { faceObservationsFromScene } from './inspector/faces.js';
 import { useServerData } from './useServerData.js';
 import { useAgentTasks } from './useAgentTasks.js';
 import { runPreflight } from './server/preflight.js';
@@ -1143,8 +1144,17 @@ function App() {
   useEffect(() => {
     const resolution = voiceIdentity.result?.resolution;
     if (resolution?.status !== 'resolved') return;
-    people.coordinator.acceptServerVoiceResolution({ ...resolution, sessionId: voiceIdentity.result.sessionId, speakerLabel: resolution.speakerLabel ?? voiceIdentity.result.speakerLabel });
-  }, [people.coordinator, voiceIdentity.result]);
+    people.coordinator.acceptServerVoiceResolution({
+      ...resolution,
+      sessionId: voiceIdentity.result.sessionId,
+      speakerLabel: resolution.speakerLabel ?? voiceIdentity.result.speakerLabel,
+      // Who the camera can see, so a voice match that contradicts a confident
+      // face resolves to nobody instead of quietly overruling it. This is the
+      // path real voice identity takes, so the cross-modal rule has to be
+      // applied here and not only in resolve().
+      faceObservations: faceObservationsFromScene(inspector.sceneStore.current?.getState?.() ?? null),
+    });
+  }, [people.coordinator, voiceIdentity.result, inspector.sceneStore]);
 
   // Approved proposals / converted suggestions become local agent task state.
   useEffect(() => {

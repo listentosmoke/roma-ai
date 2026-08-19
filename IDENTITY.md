@@ -529,6 +529,16 @@ So face evidence is deliberately given a narrow job:
 | face vs. a manual confirmation or correction | the human wins; face is not even consulted |
 | face for a person the user rejected | dropped before it becomes evidence |
 
+The rule is applied in **two** places, and the second one is the one that
+actually runs. `resolve()`'s voice branch is unreachable in the browser —
+there is no bounded raw-audio pipeline, so `runtime.js` always passes
+`voiceSampleRef: null` (see "Provider limitations"). Real voice identity
+arrives instead through `acceptServerResolution`, after the server-side WavLM
+match. So that path checks the camera too: a confident face on somebody else
+**refuses the adoption** (`ok: false`, `cross_modal_disagreement`) rather than
+overruling it, and an agreeing face is recorded alongside. Without that, the
+table above would have been true in the tests and false in the app.
+
 Thresholds live in `RESOLUTION_THRESHOLDS` (`strongFaceMatch`,
 `mediumFaceMatch`, `minFaceQuality`); `face_match` ranks *below* `voice_match`
 in `IDENTITY_EVIDENCE_TYPES` for exactly the reason above. Presence is

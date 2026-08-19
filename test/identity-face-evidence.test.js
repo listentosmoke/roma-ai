@@ -318,3 +318,78 @@ test('malformed face observations are ignored rather than trusted', async () => 
   assert.deepEqual(result.presentPersonIds, [], 'a missing quality is unusable, not perfect');
   assert.equal(result.reasonCode, 'no_evidence');
 });
+
+// ── the path real voice identity actually takes ───────────────────────────
+//
+// resolve()'s voice branch is unreachable in the running app: the browser has
+// no bounded raw-audio pipeline, so runtime.js always passes voiceSampleRef:
+// null. Real voice matches arrive through acceptServerResolution instead. The
+// cross-modal rule therefore has to hold HERE, or it is true in tests and
+// false in production — which is exactly what it was.
+
+function serverResolution(personId) {
+  return { sessionId: 's1', speakerLabel: 'Speaker 0', personId, evidenceIds: ['evidence_voice_1'], status: 'resolved' };
+}
+
+test('a server voice resolution is adopted when the camera agrees, and says so', () => {
+  const { resolver, repository } = setup();
+  const matt = repository.createPerson({ displayName: 'Matt', identityStatus: 'confirmed' }).person;
+
+  const result = resolver.acceptServerResolution({ ...serverResolution(matt.personId), faceObservations: [seen(matt.personId, 0.9)] });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.reasonCode, 'cross_modal_agreement');
+  assert.equal(resolver.getContinuity('s1', 'Speaker 0').personId, matt.personId);
+  const evidence = repository.listEvidenceForPerson(matt.personId).at(-1);
+  assert.equal(evidence.evidenceType, 'face_match');
+  assert.equal(evidence.decision, 'resolved');
+});
+
+test('a server voice resolution is REFUSED when the camera is confident about someone else', () => {
+  const { resolver, repository } = setup();
+  const matt = repository.createPerson({ displayName: 'Matt', identityStatus: 'confirmed' }).person;
+  const jon = repository.createPerson({ displayName: 'Jon', identityStatus: 'confirmed' }).person;
+
+  const result = resolver.acceptServerResolution({ ...serverResolution(matt.personId), faceObservations: [seen(jon.personId, 0.93)] });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reasonCode, 'cross_modal_disagreement');
+  assert.equal(result.contradictedBy, jon.personId);
+  assert.equal(resolver.getContinuity('s1', 'Speaker 0'), null, 'nothing is adopted on a disagreement');
+  assert.equal(repository.listEvidenceForPerson(jon.personId).at(-1).reasonCode, 'cross_modal_disagreement');
+});
+
+test('a server voice resolution with no camera on behaves exactly as before', () => {
+  const { resolver, repository } = setup();
+  const matt = repository.createPerson({ displayName: 'Matt', identityStatus: 'confirmed' }).person;
+
+  const result = resolver.acceptServerResolution(serverResolution(matt.personId));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.reasonCode, 'voice_profile_similarity');
+  assert.equal(resolver.getContinuity('s1', 'Speaker 0').personId, matt.personId);
+});
+
+test('a merely-present face does not veto a server voice resolution', () => {
+  const { resolver, repository } = setup();
+  const matt = repository.createPerson({ displayName: 'Matt', identityStatus: 'confirmed' }).person;
+  const jon = repository.createPerson({ displayName: 'Jon', identityStatus: 'confirmed' }).person;
+
+  const result = resolver.acceptServerResolution({
+    ...serverResolution(matt.personId),
+    faceObservations: [seen(jon.personId, RESOLUTION_THRESHOLDS.strongFaceMatch - 0.05)],
+  });
+
+  assert.equal(result.ok, true, 'someone in shot is usually the person being spoken TO');
+});
+
+test('a rejected person cannot block a server voice resolution through the camera', () => {
+  const { resolver, repository } = setup();
+  const matt = repository.createPerson({ displayName: 'Matt', identityStatus: 'confirmed' }).person;
+  const jon = repository.createPerson({ displayName: 'Jon', identityStatus: 'confirmed' }).person;
+  resolver.rejectMatch({ sessionId: 's1', speakerLabel: 'Speaker 0', personId: jon.personId });
+
+  const result = resolver.acceptServerResolution({ ...serverResolution(matt.personId), faceObservations: [seen(jon.personId, 0.99)] });
+
+  assert.equal(result.ok, true);
+});
