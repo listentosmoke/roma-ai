@@ -12,8 +12,8 @@ in-process Node server that holds every API key and a SQLite database.
   local server proxy; turns split on real speaker changes, not every pause.
 - **Visual perception (Inspector)** — webcam → in-browser COCO-SSD object
   detection → tracked "Live Scene State" + a rolling frame buffer; the agent
-  reads a compact scene snapshot at think-time. (Face recognition is a
-  placeholder; the scene interpreter is template-based.)
+  reads a compact scene snapshot at think-time. Recognised people are named in
+  the snapshot; the scene interpreter itself is still template-based.
 - **Reactive agent** — every finalized turn is classified by a Groq-hosted
   model (`openai/gpt-oss-20b`) under a strict JSON decision schema:
   ignore / respond / clarify / tool call / vision inspection / task update.
@@ -41,9 +41,14 @@ in-process Node server that holds every API key and a SQLite database.
 - **Entity resolution + relationships** — stable person records, aliases,
   evidence chains; diarization labels are never auto-promoted to identities.
 - **Facial recognition** — local InsightFace (SCRFD + ArcFace, 512-d) running
-  server-side through onnxruntime; templates are AES-256-GCM encrypted and
-  never leave the machine. A match is *evidence*, never authentication, there
-  is **no liveness detection**, and **consent enforcement is currently OFF**
+  server-side through onnxruntime; templates never leave the machine and are
+  stored unencrypted at rest, relying on full-disk encryption (migration 0006
+  records that trade). Per-frame identity is smoothed by temporal voting, and
+  a match becomes `face_match` **presence** evidence in the identity resolver:
+  because the camera is worn and looks outward, a face can corroborate or
+  contradict a voice match but never decides who is speaking on its own. A
+  match is *evidence*, never authentication, there is **no liveness
+  detection**, and **consent enforcement is currently OFF**
   (`FACE_IDENTITY_REQUIRE_CONSENT=1` restores it). Models are non-commercial
   research use. See [PLAN-FACE-IDENTITY.md](PLAN-FACE-IDENTITY.md).
 - **Real voice identity** — explicit, consented speaker enrollment with a
@@ -126,7 +131,7 @@ untrusted users as-is.
 ## Tests, simulations, build
 
 ```bash
-npm test                  # full offline suite (701 tests, ~3s, no network/keys)
+npm test                  # full offline suite (730 tests, ~3s, no network/keys)
 npm run build             # production bundle (dist/)
 npm run preflight         # server-side startup health check
 
@@ -175,9 +180,14 @@ node scripts/run-virtual-scenarios.mjs --family agent_env --real-worker
   never "please ignore"-annotated.
 - Stored text (memories, names) is always compiled as quoted data; prompt
   injection stays inert (tested).
-- Biometric templates are AES-256-GCM encrypted at rest, never leave the
-  server, never enter prompts, and are gated on explicit revocable consent.
-- Voice similarity is probabilistic evidence — never authentication.
+- Voice templates are AES-256-GCM encrypted at rest; face templates are
+  stored in plaintext behind full-disk encryption (a recorded trade — see
+  migration 0006). Neither leaves the server or enters a prompt. Voice
+  enrollment is gated on explicit revocable consent; face consent enforcement
+  is currently OFF.
+- Voice and face similarity are probabilistic evidence — never authentication.
+  A person's own words outrank both: no biometric can override a manual
+  confirmation or a correction.
 - A background worker gets an allowlisted environment (no Roma keys, no
   database path), a verified-narrow tool surface with no route back to the
   wearer, and — in write mode — an isolated git worktree entered only after
@@ -188,8 +198,10 @@ node scripts/run-virtual-scenarios.mjs --family agent_env --real-worker
 
 - Development-only authentication; no TLS; single-writer SQLite — local
   single-user deployment only.
-- Face recognition, scene interpretation, and detector classes are
-  placeholder/generic (see [INSPECTOR.md](INSPECTOR.md)).
+- Scene interpretation and detector classes are generic/template-based (see
+  [INSPECTOR.md](INSPECTOR.md)). Face accuracy is calibrated on public
+  photographs, not on the people who will actually use it, and demographic
+  performance is unmeasured here.
 - No real embedding provider — memory retrieval is keyword/structured.
 - Voice-identity calibration is tiny and local; replay checking is a
   narrow heuristic, not liveness.
@@ -204,4 +216,6 @@ node scripts/run-virtual-scenarios.mjs --family agent_env --real-worker
   auto-approves shell commands *inside its isolated worktree* — the isolation
   is the worktree plus the wearer's approval, not a sandbox
   ([AGENT-ENV.md](AGENT-ENV.md)).
-- Facial recognition is deliberately not implemented.
+- There is no way to enrol a face from the UI yet — enrollment is a POST to
+  `/api/face/enroll` — and no liveness check, so a printed photograph may
+  match.

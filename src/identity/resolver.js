@@ -13,8 +13,17 @@
 //                             Compiler. Only uses passive signals: bounded
 //                             within-session continuity, a voice-match
 //                             comparison IF a sample happens to be available,
-//                             and name mentions against ALREADY-KNOWN aliases
-//                             (never proof of the CURRENT speaker's identity).
+//                             face observations IF the camera is on, and name
+//                             mentions against ALREADY-KNOWN aliases (never
+//                             proof of the CURRENT speaker's identity).
+//
+// Where face evidence fits: Roma is worn, so her camera looks outward and the
+// wearer is essentially never in frame. A face therefore answers "who is
+// present", not "who is speaking" — usually it is the person being spoken TO.
+// So face evidence may CORROBORATE a voice resolution (raising the recorded
+// confidence) or CONTRADICT it (forcing `unknown`), but it never promotes a
+// resolution by itself and never breaks a voice tie. Presence is reported
+// separately, as `presentPersonIds`.
 //   - attribute/selfIdentify/confirmMatch/rejectMatch/correctIdentity —
 //                             EXPLICIT operations, each corresponding 1:1 to
 //                             an identity tool (identity/tools.js). These
@@ -37,6 +46,15 @@ export const RESOLUTION_THRESHOLDS = {
   mediumVoiceMatch: 0.55,
   ambiguousMargin: 0.1,
   minVoiceQuality: 0.5,
+  // Face thresholds are cosine similarities from the server encoder, on the
+  // scale the service itself already gates at 0.50 (see
+  // server/faceIdentity/service.mjs for how that number was measured).
+  // `strongFaceMatch` sits above the service's own gate: a face only gets to
+  // corroborate or contradict a voice resolution when it is comfortably clear
+  // of the level at which the server would call it a match at all.
+  strongFaceMatch: 0.62,
+  mediumFaceMatch: 0.5,
+  minFaceQuality: 0.5,
 };
 
 const DEFAULT_SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes of inactivity ends continuity
@@ -67,6 +85,42 @@ function detectKnownNameMentions(text, repository) {
     for (const person of repository.findByName(token)) found.set(person.personId, person);
   }
   return [...found.values()];
+}
+
+/**
+ * Bounded face observations from the browser recognizer
+ * (src/inspector/faces.js), which has already been through the server
+ * matcher: `{ personId, faceProfileId, similarity, quality }`. No image, no
+ * embedding, no raw template ever reaches this layer.
+ *
+ * Anything the user has explicitly rejected for this speaker slot is dropped
+ * here, so a rejected suggestion cannot come back through the camera. Repeat
+ * sightings of one person collapse to their best observation.
+ */
+function normalizeFaceObservations(raw, rejected, thresholds) {
+  if (!Array.isArray(raw)) return [];
+  const byPerson = new Map();
+  for (const observation of raw) {
+    const personId = observation?.personId;
+    if (!personId || rejected.has(personId)) continue;
+    const similarity = Number(observation.similarity);
+    // A missing quality is treated as unusable rather than perfect: the
+    // caller that knows the detector score is the one that must supply it.
+    const quality = Number(observation.quality ?? 0);
+    if (!Number.isFinite(similarity) || similarity < thresholds.mediumFaceMatch) continue;
+    if (!Number.isFinite(quality) || quality < thresholds.minFaceQuality) continue;
+    const existing = byPerson.get(personId);
+    if (existing && existing.similarity >= similarity) continue;
+    byPerson.set(personId, {
+      personId,
+      faceProfileId: observation.faceProfileId ?? null,
+      similarity,
+      quality,
+      provider: typeof observation.provider === 'string' ? observation.provider : null,
+      providerModel: typeof observation.providerModel === 'string' ? observation.providerModel : null,
+    });
+  }
+  return [...byPerson.values()].sort((a, b) => b.similarity - a.similarity);
 }
 
 /**
@@ -156,19 +210,38 @@ export function createEntityResolver({ repository, voiceProvider = null, now = D
     transcriptIds = [],
     transcriptText = '',
     voiceSampleRef = null,
+    faceObservations = [],
     candidatePersonIds = [],
     time = now(),
   } = {}, { signal, isStillCurrent = () => true } = {}) {
     const early = cancelledOrStale(signal, isStillCurrent, speakerLabel, time);
     if (early) return early;
 
+    const rejected = getRejected(sessionId, speakerLabel);
+    const faces = normalizeFaceObservations(faceObservations, rejected, resolutionThresholds);
+    // Only a face clear of `strongFaceMatch` is allowed to corroborate or
+    // contradict a voice resolution. Weaker ones are still recorded, but they
+    // never change an outcome.
+    const strongFaces = faces.filter((f) => f.similarity >= resolutionThresholds.strongFaceMatch);
+    const presentPersonIds = faces.map((f) => f.personId);
+
+    function addFaceEvidence(face, decision, reasonCode) {
+      return repository.addEvidence({
+        evidenceType: 'face_match', personId: face.personId, speakerLabel, sessionId, interactionId, turnId, transcriptIds,
+        faceProfileId: face.faceProfileId, provider: face.provider, providerModel: face.providerModel,
+        score: face.similarity, confidence: face.similarity, quality: face.quality, decision, reasonCode,
+      }).evidence.evidenceId;
+    }
+
     const continuity = getContinuity(sessionId, speakerLabel, time);
     if (continuity) {
-      return { resolutionId: generateResolutionId(time), status: 'resolved', personId: continuity.personId, candidateMatches: [], speakerLabel, evidenceIds: continuity.evidenceIds, requiresConfirmation: false, reasonCode: 'session_continuity' };
+      // An explicit confirmation/attribution/correction lives here. A camera
+      // must not be able to unseat it, so face evidence is not even consulted
+      // — it is only reported as presence.
+      return { resolutionId: generateResolutionId(time), status: 'resolved', personId: continuity.personId, candidateMatches: [], speakerLabel, evidenceIds: continuity.evidenceIds, requiresConfirmation: false, reasonCode: 'session_continuity', presentPersonIds };
     }
 
     if (voiceSampleRef && voiceProvider) {
-      const rejected = getRejected(sessionId, speakerLabel);
       const pool = (candidatePersonIds.length ? candidatePersonIds.map((id) => repository.getPerson(id)).filter(Boolean) : repository.listPeople({ status: 'active' }).filter((p) => p.voiceProfileIds.length))
         .filter((p) => !rejected.has(p.personId))
         .slice(0, MAX_VOICE_CANDIDATES);
@@ -189,14 +262,49 @@ export function createEntityResolver({ repository, voiceProvider = null, now = D
             const strong = top.score >= resolutionThresholds.strongVoiceMatch && (!second || top.score - second.score >= resolutionThresholds.ambiguousMargin);
 
             if (strong) {
+              const corroborating = strongFaces.find((f) => f.personId === personId) ?? null;
+              // A confident face on somebody ELSE, with nobody confirming the
+              // voice's answer, is a genuine conflict between two biometrics.
+              // It resolves to unknown — never to whichever scored higher.
+              // Both readings are kept as candidate evidence so the
+              // disagreement is inspectable rather than silently discarded.
+              const contradicting = !corroborating && strongFaces.length ? strongFaces[0] : null;
+
+              if (contradicting) {
+                const voiceEvidence = repository.addEvidence({
+                  evidenceType: 'voice_match', personId, speakerLabel, sessionId, interactionId, turnId, transcriptIds,
+                  voiceSampleRef: typeof voiceSampleRef === 'string' ? voiceSampleRef : (voiceSampleRef?.id ?? null),
+                  provider: identifyResult.provider, providerModel: identifyResult.providerModel,
+                  score: top.score, confidence: top.score, quality: top.quality, decision: 'candidate', reasonCode: 'cross_modal_disagreement',
+                });
+                const faceEvidenceIds = strongFaces.map((face) => addFaceEvidence(face, 'candidate', 'cross_modal_disagreement'));
+                return {
+                  resolutionId: generateResolutionId(time),
+                  status: 'unknown',
+                  personId: null,
+                  candidateMatches: [
+                    { personId, score: top.score, confidence: top.score, reasonCodes: ['voice_profile_similarity', 'cross_modal_disagreement'] },
+                    ...strongFaces.map((face) => ({ personId: face.personId, score: face.similarity, confidence: face.similarity, reasonCodes: ['face_profile_similarity', 'cross_modal_disagreement'] })),
+                  ],
+                  speakerLabel,
+                  evidenceIds: [voiceEvidence.evidence.evidenceId, ...faceEvidenceIds],
+                  requiresConfirmation: true,
+                  reasonCode: 'cross_modal_disagreement',
+                  presentPersonIds,
+                };
+              }
+
               const evidence = repository.addEvidence({
                 evidenceType: 'voice_match', personId, speakerLabel, sessionId, interactionId, turnId, transcriptIds,
                 voiceSampleRef: typeof voiceSampleRef === 'string' ? voiceSampleRef : (voiceSampleRef?.id ?? null),
                 provider: identifyResult.provider, providerModel: identifyResult.providerModel,
-                score: top.score, confidence: top.score, quality: top.quality, decision: 'resolved', reasonCode: 'voice_profile_similarity',
+                score: top.score, confidence: top.score, quality: top.quality, decision: 'resolved',
+                reasonCode: corroborating ? 'cross_modal_agreement' : 'voice_profile_similarity',
               });
-              setContinuity(sessionId, speakerLabel, personId, time, [evidence.evidence.evidenceId]);
-              return { resolutionId: generateResolutionId(time), status: 'resolved', personId, candidateMatches: [], speakerLabel, evidenceIds: [evidence.evidence.evidenceId], requiresConfirmation: false, reasonCode: 'voice_profile_similarity' };
+              const evidenceIds = [evidence.evidence.evidenceId];
+              if (corroborating) evidenceIds.push(addFaceEvidence(corroborating, 'resolved', 'cross_modal_agreement'));
+              setContinuity(sessionId, speakerLabel, personId, time, evidenceIds);
+              return { resolutionId: generateResolutionId(time), status: 'resolved', personId, candidateMatches: [], speakerLabel, evidenceIds, requiresConfirmation: false, reasonCode: corroborating ? 'cross_modal_agreement' : 'voice_profile_similarity', presentPersonIds };
             }
 
             // Medium-confidence or competing candidates: record as candidate
@@ -213,20 +321,38 @@ export function createEntityResolver({ repository, voiceProvider = null, now = D
               });
               return evidence.evidence.evidenceId;
             });
+            // A face is NOT allowed to break a voice tie. Under a worn
+            // camera the person in frame is usually the one being spoken TO,
+            // so letting presence settle "who is speaking" would confidently
+            // pick the wrong candidate. Face readings are recorded alongside
+            // the ambiguity; a human still settles it.
+            const faceEvidenceIds = faces.map((face) => addFaceEvidence(face, 'candidate', 'face_seen_during_ambiguous_voice'));
             return {
               resolutionId: generateResolutionId(time),
               status: 'ambiguous',
               personId: null,
-              candidateMatches: eligible.map((m) => ({ personId: profileToPerson.get(m.voiceProfileId) ?? m.personId, score: m.score, confidence: m.score, reasonCodes: ['voice_profile_similarity'] })),
+              candidateMatches: [
+                ...eligible.map((m) => ({ personId: profileToPerson.get(m.voiceProfileId) ?? m.personId, score: m.score, confidence: m.score, reasonCodes: ['voice_profile_similarity'] })),
+                ...faces.map((face) => ({ personId: face.personId, score: face.similarity, confidence: face.similarity, reasonCodes: ['face_profile_similarity'] })),
+              ],
               speakerLabel,
-              evidenceIds,
+              evidenceIds: [...evidenceIds, ...faceEvidenceIds],
               requiresConfirmation: true,
               reasonCode: eligible.length > 1 ? 'competing_voice_candidates' : 'single_unconfirmed_candidate',
+              presentPersonIds,
             };
           }
         }
       }
     }
+
+    // Face with no voice to corroborate it. This is the ordinary case for a
+    // worn camera, and it is NOT a speaker resolution: seeing someone means
+    // they are present, not that they are the one talking — most often they
+    // are the person the wearer is talking to. It is recorded as presence
+    // context and reported through `presentPersonIds`, and it deliberately
+    // never sets session continuity.
+    const faceEvidenceIds = faces.map((face) => addFaceEvidence(face, 'context_only', 'face_present_not_speaking'));
 
     // Passive name-mention context: NEVER identifies the current speaker —
     // only recorded as context evidence for a KNOWN existing person.
@@ -236,10 +362,20 @@ export function createEntityResolver({ repository, voiceProvider = null, now = D
         evidenceType: 'name_mention', personId: person.personId, speakerLabel, sessionId, interactionId, turnId, transcriptIds,
         decision: 'context_only', reasonCode: 'name_mentioned_in_transcript',
       }).evidence.evidenceId);
-      return { resolutionId: generateResolutionId(time), status: 'unknown', personId: null, candidateMatches: [], speakerLabel, evidenceIds, requiresConfirmation: false, reasonCode: 'name_mention_not_identity' };
+      return { resolutionId: generateResolutionId(time), status: 'unknown', personId: null, candidateMatches: [], speakerLabel, evidenceIds: [...faceEvidenceIds, ...evidenceIds], requiresConfirmation: false, reasonCode: 'name_mention_not_identity', presentPersonIds };
     }
 
-    return { resolutionId: generateResolutionId(time), status: 'unknown', personId: null, candidateMatches: [], speakerLabel, evidenceIds: [], requiresConfirmation: false, reasonCode: 'no_evidence' };
+    return {
+      resolutionId: generateResolutionId(time),
+      status: 'unknown',
+      personId: null,
+      candidateMatches: faces.map((face) => ({ personId: face.personId, score: face.similarity, confidence: face.similarity, reasonCodes: ['face_profile_similarity'] })),
+      speakerLabel,
+      evidenceIds: faceEvidenceIds,
+      requiresConfirmation: false,
+      reasonCode: faces.length ? 'face_presence_not_speaker' : 'no_evidence',
+      presentPersonIds,
+    };
   }
 
   /** "That was Matt." / "Speaker 1 is Matt." — explicit attribution by the primary user about (usually) someone else. High authority: may confirm a person outright. */

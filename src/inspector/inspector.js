@@ -95,7 +95,18 @@ export function createInspector({
     const identities = faces ? await faces.identify(frame, personTracks) : [];
     const people = personTracks.map((track) => {
       const match = identities.find((identity) => identity.id === track.id);
-      return { id: track.id, identity: match?.identity ?? null, confidence: match?.confidence ?? 0, lastSeenAt: track.lastSeenAt };
+      return {
+        id: track.id,
+        identity: match?.identity ?? null,
+        // Carried so the agent runtime can hand the identity resolver a
+        // bounded face observation (src/identity/resolver.js). No template,
+        // no embedding, no frame — an id, a score and a quality.
+        personId: match?.personId ?? null,
+        faceProfileId: match?.faceProfileId ?? null,
+        confidence: match?.confidence ?? 0,
+        quality: match?.quality ?? 0,
+        lastSeenAt: track.lastSeenAt,
+      };
     });
     const objects = tracks.filter((track) => track.label !== 'person');
     const t5 = now();

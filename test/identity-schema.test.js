@@ -50,10 +50,23 @@ test('identityEvidenceRank orders correction/manual_confirmation above name_ment
   assert.ok(identityEvidenceRank('memory_context') < identityEvidenceRank('voice_match'));
 });
 
-test('future_face_match is a valid schema value but is schema-support only', () => {
-  assert.ok(IDENTITY_EVIDENCE_TYPES.includes('future_face_match'));
-  const { ok } = validateEvidence({ evidenceId: 'e1', evidenceType: 'future_face_match', personId: 'p1' });
+test('face evidence is a real evidence type, and ranks below voice', () => {
+  assert.ok(IDENTITY_EVIDENCE_TYPES.includes('face_match'));
+  assert.ok(IDENTITY_EVIDENCE_TYPES.includes('face_enrollment'));
+  assert.ok(!IDENTITY_EVIDENCE_TYPES.includes('future_face_match'), 'the placeholder name is gone');
+  // A worn camera sees who is PRESENT, not who is SPEAKING — so a face must
+  // never outrank the voice it is corroborating (see identity/resolver.js).
+  assert.ok(identityEvidenceRank('face_match') < identityEvidenceRank('voice_match'));
+  assert.ok(identityEvidenceRank('face_enrollment') < identityEvidenceRank('voice_enrollment'));
+  assert.ok(identityEvidenceRank('face_match') < identityEvidenceRank('manual_confirmation'));
+  assert.ok(identityEvidenceRank('face_match') < identityEvidenceRank('correction'));
+});
+
+test('face evidence is labeled biometric and keeps its profile reference', () => {
+  const { ok, evidence } = validateEvidence({ evidenceId: 'e1', evidenceType: 'face_match', personId: 'p1', faceProfileId: 'face_profile_1', score: 0.8 });
   assert.equal(ok, true);
+  assert.equal(evidence.sensitivity, 'biometric');
+  assert.equal(evidence.faceProfileId, 'face_profile_1');
 });
 
 test('validateRelationship accepts a full record and rejects a bad type', () => {

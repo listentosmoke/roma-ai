@@ -46,7 +46,14 @@ export function compileSceneSnapshot(state, { at = now(), maxObjects = 8, maxEve
 
   const people = state.people ?? [];
   if (people.length) {
-    const parts = people.map((p) => (p.identity ? `${p.identity} (${Math.round((p.confidence ?? 0) * 100)}%)` : 'unidentified person'));
+    // A recognised person whose name the browser could not look up is
+    // described as recognised-but-unnamed. Never print the record id at the
+    // model: it is not a name, and it would read like one.
+    const parts = people.map((p) => {
+      if (p.identity) return `${p.identity} (${Math.round((p.confidence ?? 0) * 100)}%)`;
+      if (p.personId) return `a recognized person, name unknown here (${Math.round((p.confidence ?? 0) * 100)}%)`;
+      return 'unidentified person';
+    });
     lines.push(`- People present: ${parts.join(', ')}`);
   }
 

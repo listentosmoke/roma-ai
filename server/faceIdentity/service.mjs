@@ -143,9 +143,17 @@ export function createFaceIdentityService({
           && (!runnerUp || best.similarity - runnerUp.similarity >= margin);
 
         if (decisive) scoped.recordMatch(best.faceProfileId, best.similarity);
+        // The same gate enrollment uses, reported rather than enforced: a
+        // small, dim or turned-away face still gets a similarity here, but
+        // downstream (src/identity/resolver.js) refuses to treat a low-quality
+        // observation as evidence about who someone is. Enrollment rejects
+        // outright; identification reports, because the Inspector can
+        // usefully label a track it would be wrong to build identity on.
+        const quality = faceQuality(face);
         results.push({
           box: { score: face.score, x1: face.x1, y1: face.y1, x2: face.x2, y2: face.y2 },
           match: decisive ? { personId: best.personId, faceProfileId: best.faceProfileId, similarity: best.similarity } : null,
+          quality: { ok: quality.ok, value: quality.ok ? face.score : 0, reasonCode: quality.ok ? null : quality.reasonCode, size: quality.size },
           reasonCode: decisive ? 'matched' : (best && best.similarity >= matchThreshold ? 'ambiguous' : 'below_threshold'),
           bestSimilarity: best?.similarity ?? 0,
         });

@@ -127,3 +127,72 @@ test('deleting a person does not silently delete unrelated memories', () => {
   assert.ok(memRepo.get(mem.memoryId)); // memory untouched
   assert.equal(idRepo.getPerson(matt.personId).status, 'deleted');
 });
+
+// ── face profiles (F3) ─────────────────────────────────────────────────────
+//
+// A person's faceProfileIds are DERIVED from face_templates rather than kept
+// as a second list, so the two can never drift apart.
+
+function enrolFace(db, { faceProfileId, personId, workspaceId = 'w1' }) {
+  db.prepare(`INSERT INTO face_templates (face_profile_id, workspace_id, person_id, provider, model, model_revision, model_version, template_version, dimensions, encrypted_template, encryption_algorithm, encryption_nonce, encryption_auth_tag, encryption_key_version, sample_count, aggregate_quality, status, created_at, updated_at, template_plain)
+    VALUES (?,?,?,'insightface','buffalo_l','rev0','1',2,512,'','none','','',0,1,0.9,'active',1,1,'[]')`)
+    .run(faceProfileId, workspaceId, personId);
+}
+
+test('a person carries the face profiles that actually exist for them', () => {
+  const { db, identityRepository } = setup();
+  const repo = identityRepository.forWorkspace('w1', 'u1');
+  const matt = repo.createPerson({ displayName: 'Matt', identityStatus: 'confirmed' }).person;
+  assert.deepEqual(matt.faceProfileIds, [], 'nothing enrolled yet');
+
+  enrolFace(db, { faceProfileId: 'face_1', personId: matt.personId });
+  assert.deepEqual(repo.getPerson(matt.personId).faceProfileIds, ['face_1']);
+});
+
+test('attaching a face profile writes the enrollment evidence trail', () => {
+  const { db, identityRepository } = setup();
+  const repo = identityRepository.forWorkspace('w1', 'u1');
+  const matt = repo.createPerson({ displayName: 'Matt', identityStatus: 'confirmed' }).person;
+  enrolFace(db, { faceProfileId: 'face_1', personId: matt.personId });
+
+  const result = repo.attachFaceProfile(matt.personId, 'face_1', { provider: 'insightface', providerModel: 'buffalo_l', quality: 0.92, sampleCount: 3 });
+  assert.equal(result.ok, true);
+
+  const evidence = repo.listEvidenceForPerson(matt.personId).at(-1);
+  assert.equal(evidence.evidenceType, 'face_enrollment');
+  assert.equal(evidence.decision, 'enrolled');
+  assert.equal(evidence.faceProfileId, 'face_1', 'the profile reference survives the round trip through SQLite');
+  assert.equal(evidence.sensitivity, 'biometric');
+  assert.equal(evidence.reasonCode, 'explicit_enrollment_3_samples');
+});
+
+test('attaching a face profile to nobody fails rather than orphaning evidence', () => {
+  const { identityRepository } = setup();
+  const repo = identityRepository.forWorkspace('w1', 'u1');
+  assert.equal(repo.attachFaceProfile('person_does_not_exist', 'face_1').ok, false);
+});
+
+test('forgetting a person stops the camera recognising them', () => {
+  const { db, identityRepository } = setup();
+  const repo = identityRepository.forWorkspace('w1', 'u1');
+  const matt = repo.createPerson({ displayName: 'Matt', identityStatus: 'confirmed' }).person;
+  enrolFace(db, { faceProfileId: 'face_1', personId: matt.personId });
+
+  repo.deletePerson(matt.personId);
+
+  const row = db.prepare('SELECT status FROM face_templates WHERE face_profile_id = ?').get('face_1');
+  assert.equal(row.status, 'deleted', 'a forgotten person must not keep producing face evidence');
+});
+
+test('merging people carries their face profiles onto the surviving record', () => {
+  const { db, identityRepository } = setup();
+  const repo = identityRepository.forWorkspace('w1', 'u1');
+  const target = repo.createPerson({ displayName: 'Matt', identityStatus: 'confirmed' }).person;
+  const source = repo.createPerson({ displayName: 'Matthew', identityStatus: 'candidate' }).person;
+  enrolFace(db, { faceProfileId: 'face_target', personId: target.personId });
+  enrolFace(db, { faceProfileId: 'face_source', personId: source.personId });
+
+  const merged = repo.mergePeople([source.personId], target.personId);
+  assert.equal(merged.ok, true);
+  assert.deepEqual(repo.getPerson(target.personId).faceProfileIds.sort(), ['face_source', 'face_target']);
+});

@@ -104,7 +104,7 @@ separately-stored evidence record: `evidenceId`, `evidenceType`, `personId`,
 Evidence types, ordered **lowest to highest authority**
 (`identityEvidenceRank()`): `memory_context`, `relationship_context`,
 `name_mention`, `diarization_continuity`, `tool_verified_identity`,
-`future_face_match` (schema-support only), `explicit_self_identification`,
+`face_match`, `face_enrollment`, `explicit_self_identification`,
 `voice_match`, `voice_enrollment`, `explicit_user_attribution`,
 `manual_confirmation`, `manual_rejection`, `correction`. A correction can only
 invalidate a resolution whose own evidence rank is no higher — this is
@@ -506,23 +506,51 @@ not real-provider biometric verification (no real voice-identity provider
 exists to verify — see "Provider limitations"). See the final report for the
 exact steps executed and their results.
 
-## Facial-recognition extension points
+## Facial recognition in the resolver
 
-`faceProfileIds[]` exists on the person schema (always empty in this phase).
-`future_face_match` exists in `IDENTITY_EVIDENCE_TYPES` (schema-support
-only — nothing produces it). A future face provider would follow the exact
-same interface pattern as `voiceProvider.js`
-(`enroll/compare/identify/deleteProfile/getProfileMetadata/getProviderStatus`)
-and write `future_face_match` evidence through the same
-`repository.addEvidence()`/`resolver` path — no Person Repository redesign
-needed. No facial recognition, automatic face enrollment, or face-based
-resolution logic exists anywhere in this codebase today.
+Face identity is real now (`server/faceIdentity/`, and
+[PLAN-FACE-IDENTITY.md](PLAN-FACE-IDENTITY.md) for how it was built and
+measured). What matters *here* is the rule it obeys inside entity resolution,
+because it is not the obvious one:
+
+> **Roma is worn.** Her camera looks outward, so the wearer is essentially
+> never in frame. A face therefore answers "who is **present**", while
+> `resolve()` is asking "who is **speaking**" — and the person in shot is
+> most often the one being spoken *to*.
+
+So face evidence is deliberately given a narrow job:
+
+| situation | outcome |
+|---|---|
+| face agrees with a strong voice match | resolves, `cross_modal_agreement`, both evidences recorded |
+| face contradicts a strong voice match | **unknown** — never the higher score. Both readings kept as candidates |
+| face alone, no voice | `face_match` presence evidence, `face_presence_not_speaker`, no continuity |
+| face during an ambiguous voice match | recorded as a candidate; the tie is **not** broken |
+| face vs. a manual confirmation or correction | the human wins; face is not even consulted |
+| face for a person the user rejected | dropped before it becomes evidence |
+
+Thresholds live in `RESOLUTION_THRESHOLDS` (`strongFaceMatch`,
+`mediumFaceMatch`, `minFaceQuality`); `face_match` ranks *below* `voice_match`
+in `IDENTITY_EVIDENCE_TYPES` for exactly the reason above. Presence is
+reported separately as `presentPersonIds` on the resolution, so knowing who is
+in the room never has to be smuggled in as a claim about who spoke.
+
+`person.faceProfileIds` is populated server-side, derived from the
+`face_templates` rows that actually exist rather than kept as a second list
+that could drift. Deleting a person retires their templates, so forgetting
+someone stops the camera recognising them. Enrollment writes `face_enrollment`
+evidence, so a `face_match` always has a provenance chain ending in a
+deliberate human action.
+
+Tests: `test/identity-face-evidence.test.js` (the table above, case by case),
+plus the runtime path in `test/identity-agent-integration.test.js`.
 
 ## Current limitations
 
 - No real voice-identity provider (see "Provider limitations" — an
   architectural finding, not an oversight).
-- No facial recognition (out of scope for this phase, by design).
+- No liveness detection for faces: a printed photograph may match, and there
+  is no UI to enrol a face yet (`POST /api/face/enroll` only).
 - Passive resolve() only surfaces `CURRENT SPEAKER` for `resolved`/
   `ambiguous`/`provisional`; a bare name mention against a freshly
   self-identified name intentionally does NOT get promoted into that block

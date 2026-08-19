@@ -162,6 +162,7 @@ export function createIdentityCoordinator({ repository, resolver, voiceProvider 
       personId,
       displayName: person.displayName,
       voiceProfileCount: person.voiceProfileIds.length,
+      faceProfileCount: person.faceProfileIds.length,
       relationshipCount: repository.listRelationships({ entityId: personId }).length,
       linkedMemoryCount: person.linkedMemoryIds.length,
       evidenceCount: repository.listEvidenceForPerson(personId).length,
@@ -195,6 +196,33 @@ export function createIdentityCoordinator({ repository, resolver, voiceProvider 
     }
     emit({ type: 'identity-voice-enrolled', personId, ok: result.ok, voiceProfileId: result.voiceProfileId ?? null, reasonCode: result.reasonCode ?? null, providerMode: status.mode });
     return { ...result, providerMode: status.mode };
+  }
+
+  /**
+   * Record a face enrollment that the SERVER has already performed
+   * (server/faceIdentity/service.mjs owns the template; nothing biometric
+   * crosses into the browser). This only links the opaque profile id to the
+   * person and writes the evidence trail, so the People panel can show that
+   * a face is enrolled and when.
+   */
+  function recordFaceEnrollment({ personId, faceProfileId, quality = null, sampleCount = null, provider = null, providerModel = null }) {
+    if (!personId || !faceProfileId) return { ok: false, errors: ['personId and faceProfileId are required'] };
+    const person = repository.getPerson(personId);
+    if (!person) return { ok: false, errors: [`no person with id ${personId}`] };
+    const linked = repository.linkFaceProfile(personId, faceProfileId);
+    const evidence = repository.addEvidence({
+      evidenceType: 'face_enrollment', personId, faceProfileId, provider, providerModel, quality,
+      decision: 'enrolled', reasonCode: 'explicit_enrollment', sensitivity: 'biometric',
+    });
+    emit({ type: 'identity-face-enrolled', personId, faceProfileId, ok: linked.ok, sampleCount, evidenceIds: [evidence.evidence?.evidenceId].filter(Boolean) });
+    return { ok: linked.ok, errors: linked.errors ?? [], faceProfileId, evidenceId: evidence.evidence?.evidenceId ?? null };
+  }
+
+  /** Forget a face locally. Deleting the template itself is the server's job (DELETE /api/face/profiles/:id) — this unlinks the reference the browser holds. */
+  function removeFaceProfile({ personId, faceProfileId }) {
+    const result = repository.unlinkFaceProfile(personId, faceProfileId);
+    emit({ type: 'identity-face-profile-removed', personId, faceProfileId, ok: result.ok });
+    return result;
   }
 
   async function removeVoiceProfile({ personId, voiceProfileId }) {
@@ -352,6 +380,8 @@ export function createIdentityCoordinator({ repository, resolver, voiceProvider 
     forgetPerson,
     enrollVoice,
     removeVoiceProfile,
+    recordFaceEnrollment,
+    removeFaceProfile,
     addRelationship,
     correctRelationship,
     removeRelationship,

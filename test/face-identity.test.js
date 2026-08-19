@@ -190,20 +190,21 @@ const track = (id, box) => ({ id, bbox: box });
 
 test('the default recognizer still labels nobody, honestly', async () => {
   const result = await createFaceRecognizer().identify({}, [track('t1', [0, 0, 10, 10])]);
-  assert.deepEqual(result, [{ id: 't1', identity: null, confidence: 0 }]);
+  assert.deepEqual(result, [{ id: 't1', identity: null, personId: null, faceProfileId: null, confidence: 0, quality: 0 }]);
 });
 
 test('the server recognizer maps a matched face onto the person track it overlaps', async () => {
   const recognizer = createServerFaceRecognizer({
     encodeFrame: async () => 'BASE64',
-    post: async () => ({ faces: [{ box: { x1: 2, y1: 2, x2: 8, y2: 8 }, match: { personId: 'p1', similarity: 0.91 } }] }),
+    post: async () => ({ faces: [{ box: { x1: 2, y1: 2, x2: 8, y2: 8 }, match: { personId: 'p1', faceProfileId: 'fp1', similarity: 0.91 }, quality: { ok: true, value: 0.88 } }] }),
+    describePerson: (id) => (id === 'p1' ? 'Matt' : null),
     minIntervalMs: 0,
   });
   await recognizer.identify({}, [track('t1', [0, 0, 10, 10]), track('t2', [100, 100, 110, 110])]);
   const result = await recognizer.identify({}, [track('t1', [0, 0, 10, 10]), track('t2', [100, 100, 110, 110])]);
   assert.deepEqual(result, [
-    { id: 't1', identity: 'p1', confidence: 0.91 },
-    { id: 't2', identity: null, confidence: 0 },
+    { id: 't1', identity: 'Matt', personId: 'p1', faceProfileId: 'fp1', confidence: 0.91, quality: 0.88 },
+    { id: 't2', identity: null, personId: null, faceProfileId: null, confidence: 0, quality: 0 },
   ]);
 });
 
@@ -225,7 +226,7 @@ test('recognition is throttled and never queues a backlog of stale frames', asyn
   clock += 2000;
   const later = await recognizer.identify({}, tracks);
   assert.equal(calls, 2);
-  assert.equal(later[0].identity, 'p1');
+  assert.equal(later[0].personId, 'p1');
 });
 
 test('a skipped cycle keeps the previous label instead of flickering to unknown', async () => {
@@ -240,9 +241,9 @@ test('a skipped cycle keeps the previous label instead of flickering to unknown'
   // Two spaced observations to confirm the identity…
   await recognizer.identify({}, tracks);
   clock += 2000;
-  assert.equal((await recognizer.identify({}, tracks))[0].identity, 'p1');
+  assert.equal((await recognizer.identify({}, tracks))[0].personId, 'p1');
   // …then a throttled cycle, which must report the settled vote, not a blank.
-  assert.equal((await recognizer.identify({}, tracks))[0].identity, 'p1', 'throttled cycles keep the label');
+  assert.equal((await recognizer.identify({}, tracks))[0].personId, 'p1', 'throttled cycles keep the label');
 });
 
 test('a server failure degrades to unidentified, never breaking perception', async () => {
@@ -251,7 +252,7 @@ test('a server failure degrades to unidentified, never breaking perception', asy
     post: async () => { throw new Error('offline'); },
   });
   const result = await recognizer.identify({}, [track('t1', [0, 0, 10, 10])]);
-  assert.deepEqual(result, [{ id: 't1', identity: null, confidence: 0 }]);
+  assert.deepEqual(result, [{ id: 't1', identity: null, personId: null, faceProfileId: null, confidence: 0, quality: 0 }]);
 });
 
 test('recognition does not run at all when the camera or feature is off', async () => {
@@ -275,8 +276,8 @@ test('a single frame never names anyone — identity needs repeated agreement', 
     minIntervalMs: 0,
   });
   const tracks = [track('t1', [0, 0, 10, 10])];
-  assert.equal((await recognizer.identify({}, tracks))[0].identity, null, 'one sighting is not an identification');
-  assert.equal((await recognizer.identify({}, tracks))[0].identity, 'p1', 'two agreeing sightings are');
+  assert.equal((await recognizer.identify({}, tracks))[0].personId, null, 'one sighting is not an identification');
+  assert.equal((await recognizer.identify({}, tracks))[0].personId, 'p1', 'two agreeing sightings are');
 });
 
 test('a confirmed identity survives one disagreeing frame but not a sustained one', async () => {
@@ -288,14 +289,14 @@ test('a confirmed identity survives one disagreeing frame but not a sustained on
   });
   const tracks = [track('t1', [0, 0, 10, 10])];
   await recognizer.identify({}, tracks);
-  assert.equal((await recognizer.identify({}, tracks))[0].identity, 'p1');
+  assert.equal((await recognizer.identify({}, tracks))[0].personId, 'p1');
 
   personId = 'p2';
-  assert.equal((await recognizer.identify({}, tracks))[0].identity, 'p1', 'one contrary frame must not rename someone');
+  assert.equal((await recognizer.identify({}, tracks))[0].personId, 'p1', 'one contrary frame must not rename someone');
   await recognizer.identify({}, tracks);
   await recognizer.identify({}, tracks);
   const settled = await recognizer.identify({}, tracks);
-  assert.notEqual(settled[0].identity, 'p1', 'sustained disagreement does take effect');
+  assert.notEqual(settled[0].personId, 'p1', 'sustained disagreement does take effect');
 });
 
 test('a person who leaves is forgotten rather than remembered forever', async () => {
@@ -307,10 +308,10 @@ test('a person who leaves is forgotten rather than remembered forever', async ()
   });
   const tracks = [track('t1', [0, 0, 10, 10])];
   await recognizer.identify({}, tracks);
-  assert.equal((await recognizer.identify({}, tracks))[0].identity, 'p1');
+  assert.equal((await recognizer.identify({}, tracks))[0].personId, 'p1');
 
   hasFace = false;
   await recognizer.identify({}, tracks);
   await recognizer.identify({}, tracks);
-  assert.equal((await recognizer.identify({}, tracks))[0].identity, null, 'the label decays once the face is gone');
+  assert.equal((await recognizer.identify({}, tracks))[0].personId, null, 'the label decays once the face is gone');
 });

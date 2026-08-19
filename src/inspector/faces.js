@@ -3,7 +3,14 @@
 // The Inspector calls identify(frame, personTracks) each cycle and merges the
 // result into the scene state's people list.
 //
-//   identify(frame, personTracks) -> Promise<[{ id, identity|null, confidence }]>
+//   identify(frame, personTracks)
+//     -> Promise<[{ id, identity|null, personId|null, faceProfileId|null,
+//                   confidence, quality }]>
+//
+// `identity` is a human-readable name for display and for the agent's scene
+// snapshot. `personId`/`faceProfileId`/`quality` are the machine-side fields
+// the identity resolver needs to turn a sighting into `face_match` evidence
+// (src/identity/resolver.js) — the resolver never reads a name.
 //
 // Two implementations satisfy that contract:
 //
@@ -30,7 +37,10 @@ export function createFaceRecognizer({ lookup } = {}) {
         return {
           id: track.id,
           identity: match?.identity ?? null,
+          personId: match?.personId ?? null,
+          faceProfileId: match?.faceProfileId ?? null,
           confidence: match?.confidence ?? 0,
+          quality: match?.quality ?? 0,
         };
       });
     },
@@ -66,6 +76,12 @@ export function createServerFaceRecognizer({
   encodeFrame,
   post,
   enabled = () => true,
+  /**
+   * personId -> display name, from the browser's people mirror. The server
+   * answers with ids; a name is the caller's to supply, and its absence is
+   * reported honestly rather than by printing an id at the agent.
+   */
+  describePerson = () => null,
   minIntervalMs = 1500,
   // Temporal voting. Measured on a real 3 fps video clip: per-frame identity is
   // noisy — faces are missed on turns and blurs, and a scene cut can put a
@@ -81,37 +97,55 @@ export function createServerFaceRecognizer({
   // Results persist between calls so tracks keep their label on the frames
   // where recognition was skipped — otherwise a name would flicker on and off.
   let lastByTrack = new Map();
-  // trackId -> { personId, hits, misses, confidence }
+  // trackId -> { personId, hits, misses, confidence, quality, faceProfileId }
   const votes = new Map();
 
   /** Fold one observation into a track's running vote. */
-  function record(trackId, personId, confidence) {
-    const vote = votes.get(trackId) ?? { personId: null, hits: 0, misses: 0, confidence: 0 };
+  function record(trackId, personId, confidence, extra = {}) {
+    const vote = votes.get(trackId) ?? { personId: null, hits: 0, misses: 0, confidence: 0, quality: 0, faceProfileId: null };
     if (personId && personId === vote.personId) {
       vote.hits += 1;
       vote.misses = 0;
       vote.confidence = Math.max(vote.confidence, confidence);
+      vote.quality = Math.max(vote.quality, extra.quality ?? 0);
+      vote.faceProfileId = extra.faceProfileId ?? vote.faceProfileId;
     } else if (personId) {
       // A different answer restarts the count rather than overwriting a
       // confirmed identity on a single frame.
       if (vote.personId && vote.hits >= confirmAfter) vote.misses += 1;
       if (!vote.personId || vote.misses >= forgetAfter || vote.hits < confirmAfter) {
         vote.personId = personId; vote.hits = 1; vote.misses = 0; vote.confidence = confidence;
+        vote.quality = extra.quality ?? 0; vote.faceProfileId = extra.faceProfileId ?? null;
       }
     } else {
       vote.misses += 1;
-      if (vote.misses >= forgetAfter) { vote.personId = null; vote.hits = 0; vote.confidence = 0; }
+      if (vote.misses >= forgetAfter) { vote.personId = null; vote.hits = 0; vote.confidence = 0; vote.quality = 0; vote.faceProfileId = null; }
     }
     votes.set(trackId, vote);
     return vote;
   }
 
-  /** Only a vote that has cleared confirmAfter is allowed to name anyone. */
+  /**
+   * Only a vote that has cleared confirmAfter is allowed to name anyone.
+   *
+   * "identity" is a DISPLAY NAME (or null) and is what gets shown and read
+   * into the agent's scene snapshot; "personId" is the machine-side reference
+   * the identity resolver works in. They are separate because a recognised
+   * person whose name the browser cannot look up must not be described to the
+   * model as an opaque record id.
+   */
   function settled(trackId) {
     const vote = votes.get(trackId);
-    return vote && vote.personId && vote.hits >= confirmAfter
-      ? { identity: vote.personId, confidence: vote.confidence }
-      : { identity: null, confidence: 0 };
+    if (!vote || !vote.personId || vote.hits < confirmAfter) {
+      return { identity: null, personId: null, faceProfileId: null, confidence: 0, quality: 0 };
+    }
+    return {
+      identity: describePerson(vote.personId) ?? null,
+      personId: vote.personId,
+      faceProfileId: vote.faceProfileId,
+      confidence: vote.confidence,
+      quality: vote.quality,
+    };
   }
 
   return {
@@ -123,7 +157,7 @@ export function createServerFaceRecognizer({
 
       if (!enabled() || !tracks.length) {
         votes.clear();
-        return tracks.map((track) => ({ id: track.id, identity: null, confidence: 0 }));
+        return tracks.map((track) => ({ id: track.id, identity: null, personId: null, faceProfileId: null, confidence: 0, quality: 0 }));
       }
       // Never queue up: a slow server must not build a backlog of stale frames.
       if (inFlight || now() - lastCallAt < minIntervalMs) return fallback();
@@ -138,14 +172,24 @@ export function createServerFaceRecognizer({
         for (const face of response?.faces ?? []) {
           if (!face.match) continue;
           const track = bestTrackForFace(face.box, tracks);
-          if (track) next.set(track.id, { identity: face.match.personId, confidence: face.match.similarity });
+          if (!track) continue;
+          next.set(track.id, {
+            personId: face.match.personId,
+            faceProfileId: face.match.faceProfileId ?? null,
+            confidence: face.match.similarity,
+            // The server's own quality gate (server/faceIdentity/service.mjs).
+            // A face it judged unusable scores 0 here, which is below every
+            // identity threshold downstream — it can label a track on screen
+            // but can never become evidence about who somebody is.
+            quality: face.quality?.value ?? 0,
+          });
         }
         lastByTrack = next;
         // Every visible track votes this cycle — including the ones that saw
         // nobody, so a person who walks away is eventually forgotten.
         for (const track of tracks) {
           const observed = next.get(track.id) ?? null;
-          record(track.id, observed?.identity ?? null, observed?.confidence ?? 0);
+          record(track.id, observed?.personId ?? null, observed?.confidence ?? 0, { quality: observed?.quality ?? 0, faceProfileId: observed?.faceProfileId ?? null });
         }
         for (const trackId of [...votes.keys()]) {
           if (!tracks.some((track) => track.id === trackId)) votes.delete(trackId);

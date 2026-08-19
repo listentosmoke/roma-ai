@@ -19,6 +19,7 @@ import { createInMemoryRepository as createMemoryRepository } from '../src/memor
 import { createSpeechGate } from '../src/proactive/speechGate.js';
 import { createToolRegistry } from '../src/agent/tools.js';
 import { registerIdentityTools } from '../src/identity/tools.js';
+import { createSceneStore } from '../src/inspector/sceneStore.js';
 
 function respondDecision(text) {
   return { decision: 'respond', response: text, reason_summary: 'relevant request', task_update: null, tool_calls: [], visual_analysis_request: null, scene_revision_used: null };
@@ -130,4 +131,51 @@ test('with no identity configured, the runtime behaves exactly as before (no CUR
   runtime.beginSession(1000);
   await runtime.handleTurn({ speaker: 'Speaker 0', text: 'what time is it?', startedAt: 0.1, endedAt: 0.4 });
   assert.doesNotMatch(seenContent, /CURRENT SPEAKER:/);
+});
+
+// ── face evidence reaching the resolver through the live runtime (F3) ──────
+
+test('who the camera can see reaches the identity resolver as presence, not as the speaker', async () => {
+  const { identity, repository } = makeIdentity();
+  const matt = repository.createPerson({ displayName: 'Matt', identityStatus: 'confirmed' }).person;
+  const store = createSceneStore();
+  store.update({
+    objects: [],
+    people: [{ id: 'track_1', identity: 'Matt', personId: matt.personId, faceProfileId: 'face_1', confidence: 0.86, quality: 0.9, lastSeenAt: 1000 }],
+    sceneLabel: 'room',
+    summary: 'One person is present.',
+  }, 1000);
+
+  const resolutions = [];
+  identity.subscribe((event) => { if (event.type === 'identity-resolved') resolutions.push(event); });
+  const provider = createMockProvider(async () => respondDecision('Sure.'));
+  const runtime = createAgentRuntime({ provider, identity, sceneStore: store });
+  runtime.beginSession(1000);
+  await runtime.handleTurn({ speaker: 'Speaker 0', text: 'Can you note that down?', startedAt: 0.1, endedAt: 0.4 });
+
+  assert.equal(resolutions.length, 1);
+  assert.equal(resolutions[0].status, 'unknown', 'a face in frame is not proof of who is talking');
+  assert.equal(resolutions[0].reasonCode, 'face_presence_not_speaker');
+
+  const evidence = repository.listEvidenceForPerson(matt.personId);
+  assert.equal(evidence.at(-1).evidenceType, 'face_match');
+  assert.equal(evidence.at(-1).faceProfileId, 'face_1');
+});
+
+test('an unidentified person in frame produces no face evidence at all', async () => {
+  const { identity, repository } = makeIdentity();
+  const store = createSceneStore();
+  store.update({
+    objects: [],
+    people: [{ id: 'track_1', identity: null, personId: null, confidence: 0, quality: 0, lastSeenAt: 1000 }],
+    sceneLabel: 'room',
+    summary: 'Someone is present.',
+  }, 1000);
+
+  const provider = createMockProvider(async () => respondDecision('Sure.'));
+  const runtime = createAgentRuntime({ provider, identity, sceneStore: store });
+  runtime.beginSession(1000);
+  await runtime.handleTurn({ speaker: 'Speaker 0', text: 'Anything on the calendar?', startedAt: 0.1, endedAt: 0.4 });
+
+  assert.deepEqual(repository.exportAll().evidence, [], 'perceiving a stranger must not create a record about them');
 });

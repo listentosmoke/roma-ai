@@ -179,6 +179,19 @@ function createRepositoryCore({ load, save, loadEvidence, saveEvidence, loadRela
       return api.updatePerson(personId, { voiceProfileIds: person.voiceProfileIds.filter((id) => id !== voiceProfileId) });
     },
 
+    linkFaceProfile(personId, faceProfileId) {
+      const person = getPerson(personId);
+      if (!person) return { ok: false, errors: [`no person with id ${personId}`] };
+      if (person.faceProfileIds.includes(faceProfileId)) return { ok: true, person };
+      return api.updatePerson(personId, { faceProfileIds: [...person.faceProfileIds, faceProfileId] });
+    },
+
+    unlinkFaceProfile(personId, faceProfileId) {
+      const person = getPerson(personId);
+      if (!person) return { ok: false, errors: [`no person with id ${personId}`] };
+      return api.updatePerson(personId, { faceProfileIds: person.faceProfileIds.filter((id) => id !== faceProfileId) });
+    },
+
     linkMemory(personId, memoryId) {
       const person = getPerson(personId);
       if (!person) return { ok: false, errors: [`no person with id ${personId}`] };
@@ -209,6 +222,7 @@ function createRepositoryCore({ load, save, loadEvidence, saveEvidence, loadRela
         for (const alias of source.aliases) if (!aliasMap.has(alias.normalizedAlias)) aliasMap.set(alias.normalizedAlias, alias);
       }
       const mergedVoiceProfileIds = [...new Set([...target.voiceProfileIds, ...sources.flatMap((s) => s.voiceProfileIds)])];
+      const mergedFaceProfileIds = [...new Set([...target.faceProfileIds, ...sources.flatMap((s) => s.faceProfileIds)])];
       const mergedMemoryIds = [...new Set([...target.linkedMemoryIds, ...sources.flatMap((s) => s.linkedMemoryIds)])];
       const mergedSupersedes = [...new Set([...target.supersedes, ...sources.map((s) => s.personId), ...sources.flatMap((s) => s.supersedes)])];
       const mergedEvidenceIds = [...new Set([...target.sourceEvidenceIds, ...sources.flatMap((s) => s.sourceEvidenceIds)])];
@@ -217,6 +231,7 @@ function createRepositoryCore({ load, save, loadEvidence, saveEvidence, loadRela
       const updated = api.updatePerson(targetPersonId, {
         aliases: [...aliasMap.values()],
         voiceProfileIds: mergedVoiceProfileIds,
+        faceProfileIds: mergedFaceProfileIds,
         linkedMemoryIds: mergedMemoryIds,
         supersedes: mergedSupersedes,
         sourceEvidenceIds: mergedEvidenceIds,
@@ -261,7 +276,7 @@ function createRepositoryCore({ load, save, loadEvidence, saveEvidence, loadRela
     },
 
     /**
-     * Split selected aliases/voiceProfileIds/relationshipIds/memoryIds off of
+     * Split selected aliases/voice+faceProfileIds/relationshipIds/memoryIds off of
      * `personId` into a new (or existing) target person. Anything NOT named
      * in `splitPlan` stays with the source — no guessing.
      */
@@ -292,6 +307,10 @@ function createRepositoryCore({ load, save, loadEvidence, saveEvidence, loadRela
       const movingVoiceIds = source.voiceProfileIds.filter((id) => voiceMoveIds.has(id));
       const remainingVoiceIds = source.voiceProfileIds.filter((id) => !voiceMoveIds.has(id));
 
+      const faceMoveIds = new Set(splitPlan.faceProfileIds ?? []);
+      const movingFaceIds = source.faceProfileIds.filter((id) => faceMoveIds.has(id));
+      const remainingFaceIds = source.faceProfileIds.filter((id) => !faceMoveIds.has(id));
+
       const memoryMoveIds = new Set(splitPlan.memoryIds ?? []);
       const movingMemoryIds = source.linkedMemoryIds.filter((id) => memoryMoveIds.has(id));
       const remainingMemoryIds = source.linkedMemoryIds.filter((id) => !memoryMoveIds.has(id));
@@ -299,12 +318,14 @@ function createRepositoryCore({ load, save, loadEvidence, saveEvidence, loadRela
       api.updatePerson(target.personId, {
         aliases: [...target.aliases, ...movingAliases],
         voiceProfileIds: [...new Set([...target.voiceProfileIds, ...movingVoiceIds])],
+        faceProfileIds: [...new Set([...target.faceProfileIds, ...movingFaceIds])],
         linkedMemoryIds: [...new Set([...target.linkedMemoryIds, ...movingMemoryIds])],
         confidence: Math.max(0, target.confidence * 0.9),
       });
       api.updatePerson(personId, {
         aliases: remainingAliases,
         voiceProfileIds: remainingVoiceIds,
+        faceProfileIds: remainingFaceIds,
         linkedMemoryIds: remainingMemoryIds,
         confidence: Math.max(0, source.confidence * 0.9),
       });
@@ -344,7 +365,7 @@ function createRepositoryCore({ load, save, loadEvidence, saveEvidence, loadRela
       const person = getPerson(personId);
       if (!person) return { ok: false, errors: [`no person with id ${personId}`] };
       if (unlinkOnly) return { ok: true, person: getPerson(personId) };
-      return api.updatePerson(personId, { status: 'deleted', identityStatus: 'deleted', voiceProfileIds: [] });
+      return api.updatePerson(personId, { status: 'deleted', identityStatus: 'deleted', voiceProfileIds: [], faceProfileIds: [] });
     },
 
     exportPerson(personId) {

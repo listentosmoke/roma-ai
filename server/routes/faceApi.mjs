@@ -102,10 +102,18 @@ export function createFaceApiHandlers({ faceIdentity, auth, identityRepository =
         action: 'face.enroll', resourceType: 'face_profile', resourceId: result.profile?.faceProfileId ?? null,
         outcome: result.ok ? 'enrolled' : 'rejected', reasonCode: result.reasonCode ?? null,
       });
-      // Keep the person record's faceProfileIds in step, so a face profile is
-      // discoverable from the person rather than only the other way round.
+      // Record the enrollment as identity evidence, so a later face_match
+      // has a provenance chain ending in a deliberate human action rather
+      // than in a template that simply appeared.
       if (result.ok && identityRepository?.forWorkspace) {
-        try { identityRepository.forWorkspace(principal.workspaceId, principal.userId).attachFaceProfile?.(body.personId, result.profile.faceProfileId); } catch { /* best effort */ }
+        try {
+          identityRepository.forWorkspace(principal.workspaceId, principal.userId).attachFaceProfile?.(body.personId, result.profile.faceProfileId, {
+            provider: result.profile.provider ?? null,
+            providerModel: result.profile.model ?? null,
+            quality: result.profile.aggregateQuality ?? null,
+            sampleCount: result.samplesUsed ?? null,
+          });
+        } catch { /* enrollment must not fail because its evidence could not be written */ }
       }
       sendJson(res, result.ok ? 201 : 400, result);
     },

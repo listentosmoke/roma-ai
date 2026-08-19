@@ -27,17 +27,22 @@ export const ALIAS_TYPES = ['name', 'nickname', 'role', 'spelling', 'other'];
 
 // Ordered LOWEST to HIGHEST authority, same convention as memory's
 // EVIDENCE_TYPES/evidenceRank: a correction/rejection can only invalidate a
-// resolution whose own evidence rank is <= its rank. `future_face_match` is
-// SCHEMA SUPPORT ONLY — nothing in this codebase produces it (see
-// IDENTITY.md "Facial-recognition extension points"); it is parked near
-// voice_match's authority tier for when a real face provider exists.
+// resolution whose own evidence rank is <= its rank.
+//
+// Face ranks BELOW voice deliberately, and it is not a hedge about model
+// quality. Roma is worn: the camera looks outward, so a face tells you who is
+// PRESENT, while a voice tells you who is SPEAKING — and `resolve()` is asking
+// the second question. Face evidence therefore corroborates or contradicts a
+// voice resolution; it never promotes one on its own (see
+// identity/resolver.js).
 export const IDENTITY_EVIDENCE_TYPES = [
   'memory_context',
   'relationship_context',
   'name_mention',
   'diarization_continuity',
   'tool_verified_identity',
-  'future_face_match',
+  'face_match',
+  'face_enrollment',
   'explicit_self_identification',
   'voice_match',
   'voice_enrollment',
@@ -46,6 +51,8 @@ export const IDENTITY_EVIDENCE_TYPES = [
   'manual_rejection',
   'correction',
 ];
+
+export const BIOMETRIC_EVIDENCE_TYPES = new Set(['voice_match', 'voice_enrollment', 'face_match', 'face_enrollment']);
 
 export function identityEvidenceRank(evidenceType) {
   const index = IDENTITY_EVIDENCE_TYPES.indexOf(evidenceType);
@@ -171,7 +178,7 @@ export function validatePerson(raw) {
       roles: normalizeRoles(raw.roles),
       attributes: normalizeAttributes(raw.attributes),
       voiceProfileIds: normalizeIdList(raw.voiceProfileIds, 10),
-      faceProfileIds: normalizeIdList(raw.faceProfileIds, 10), // reserved — see IDENTITY.md; never populated in this phase
+      faceProfileIds: normalizeIdList(raw.faceProfileIds, 10),
       relationshipIds: normalizeIdList(raw.relationshipIds),
       linkedMemoryIds: normalizeIdList(raw.linkedMemoryIds, 200),
       confidence: clamp01(raw.confidence, 0.5),
@@ -213,6 +220,9 @@ export function validateEvidence(raw) {
       turnId: raw.turnId ?? null,
       transcriptIds: normalizeIdList(raw.transcriptIds, 20),
       voiceSampleRef: raw.voiceSampleRef ?? null,
+      // Which enrolled template produced a face_match. No image reference
+      // exists on purpose: frames are never stored (see server/routes/faceApi.mjs).
+      faceProfileId: raw.faceProfileId ?? null,
       provider: typeof raw.provider === 'string' ? truncate(raw.provider, 80) : null,
       providerModel: typeof raw.providerModel === 'string' ? truncate(raw.providerModel, 80) : null,
       score: raw.score != null ? clamp01(raw.score, 0) : null,
@@ -223,9 +233,9 @@ export function validateEvidence(raw) {
       confirmedBy: raw.confirmedBy ?? null,
       createdAt: Number.isFinite(raw.createdAt) ? raw.createdAt : now,
       expiresAt: Number.isFinite(raw.expiresAt) ? raw.expiresAt : null,
-      // Voice-derived evidence defaults to 'biometric' unless the caller says
-      // otherwise — see file header: labeling only, not an access boundary.
-      sensitivity: normalizeSensitivity(raw.sensitivity, raw.evidenceType === 'voice_match' || raw.evidenceType === 'voice_enrollment' ? 'biometric' : 'normal'),
+      // Biometric-derived evidence defaults to 'biometric' unless the caller
+      // says otherwise — see file header: labeling only, not an access boundary.
+      sensitivity: normalizeSensitivity(raw.sensitivity, BIOMETRIC_EVIDENCE_TYPES.has(raw.evidenceType) ? 'biometric' : 'normal'),
     },
   };
 }

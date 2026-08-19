@@ -32,6 +32,16 @@ export function createSqliteIdentityRepository({ db, now = Date.now }) {
     function readVoiceProfileIds(personId) {
       return db.prepare('SELECT voice_profile_id FROM voice_profile_refs WHERE person_id = ? AND revoked_at IS NULL').all(personId).map((r) => r.voice_profile_id);
     }
+    // Face profiles are not a separate ref table: face_templates already
+    // carries person_id, so the person's list is derived from the templates
+    // that actually exist rather than from a second list that could drift.
+    function readFaceProfileIds(personId) {
+      try {
+        return db.prepare("SELECT face_profile_id FROM face_templates WHERE workspace_id = ? AND person_id = ? AND status = 'active'").all(workspaceId, personId).map((r) => r.face_profile_id);
+      } catch {
+        return []; // the face_identity migration has not run in this database
+      }
+    }
     function readRelationshipIds(personId) {
       return db.prepare('SELECT relationship_id FROM relationships WHERE workspace_id = ? AND (from_entity_id = ? OR to_entity_id = ?)').all(workspaceId, personId, personId).map((r) => r.relationship_id);
     }
@@ -54,7 +64,7 @@ export function createSqliteIdentityRepository({ db, now = Date.now }) {
         roles: fromJson(row.roles, []),
         attributes: fromJson(row.attributes, {}),
         voiceProfileIds: readVoiceProfileIds(row.person_id),
-        faceProfileIds: [], // reserved — never populated in this phase (see IDENTITY.md)
+        faceProfileIds: readFaceProfileIds(row.person_id),
         relationshipIds: readRelationshipIds(row.person_id),
         linkedMemoryIds: readLinkedMemoryIds(row.person_id),
         confidence: row.confidence,
@@ -159,8 +169,8 @@ export function createSqliteIdentityRepository({ db, now = Date.now }) {
         const validation = validateEvidence({ ...raw, evidenceId, createdAt: raw.createdAt ?? now() });
         if (!validation.ok) return { ok: false, evidence: null, errors: validation.errors };
         const e = validation.evidence;
-        db.prepare(`INSERT INTO identity_evidence (evidence_id, workspace_id, user_id, schema_version, evidence_type, person_id, speaker_label, session_id, interaction_id, turn_id, transcript_ids, voice_sample_ref, provider, provider_model, score, confidence, quality, decision, reason_code, confirmed_by, created_at, expires_at, sensitivity) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-          .run(e.evidenceId, workspaceId, userId, e.schemaVersion, e.evidenceType, e.personId, e.speakerLabel, e.sessionId, e.interactionId, e.turnId, toJson(e.transcriptIds), e.voiceSampleRef, e.provider, e.providerModel, e.score, e.confidence, e.quality, e.decision, e.reasonCode, e.confirmedBy, e.createdAt, e.expiresAt, e.sensitivity);
+        db.prepare(`INSERT INTO identity_evidence (evidence_id, workspace_id, user_id, schema_version, evidence_type, person_id, speaker_label, session_id, interaction_id, turn_id, transcript_ids, voice_sample_ref, face_profile_id, provider, provider_model, score, confidence, quality, decision, reason_code, confirmed_by, created_at, expires_at, sensitivity) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+          .run(e.evidenceId, workspaceId, userId, e.schemaVersion, e.evidenceType, e.personId, e.speakerLabel, e.sessionId, e.interactionId, e.turnId, toJson(e.transcriptIds), e.voiceSampleRef, e.faceProfileId, e.provider, e.providerModel, e.score, e.confidence, e.quality, e.decision, e.reasonCode, e.confirmedBy, e.createdAt, e.expiresAt, e.sensitivity);
         if (e.personId) db.prepare('UPDATE people SET last_observed_at = ? WHERE person_id = ? AND workspace_id = ?').run(e.createdAt, e.personId, workspaceId);
         return { ok: true, evidence: e, errors: [] };
       },
@@ -196,6 +206,23 @@ export function createSqliteIdentityRepository({ db, now = Date.now }) {
         const person = readPersonRow(personId);
         if (!person) return { ok: false, errors: [`no person with id ${personId}`] };
         db.prepare('DELETE FROM voice_profile_refs WHERE voice_profile_id = ? AND person_id = ? AND workspace_id = ?').run(voiceProfileId, personId, workspaceId);
+        return { ok: true, person: api.getPerson(personId) };
+      },
+
+      /**
+       * Called after the face service has already stored a template
+       * (server/routes/faceApi.mjs). The person's faceProfileIds are derived
+       * from face_templates, so there is no second list to update — what this
+       * adds is the evidence trail, so "why do you think that is Matt" can be
+       * answered for a face the same way it can for a voice.
+       */
+      attachFaceProfile(personId, faceProfileId, { provider = null, providerModel = null, quality = null, sampleCount = null } = {}) {
+        const person = readPersonRow(personId);
+        if (!person) return { ok: false, errors: [`no person with id ${personId}`] };
+        api.addEvidence({
+          evidenceType: 'face_enrollment', personId, faceProfileId, provider, providerModel, quality,
+          decision: 'enrolled', reasonCode: sampleCount > 1 ? `explicit_enrollment_${sampleCount}_samples` : 'explicit_enrollment', sensitivity: 'biometric',
+        });
         return { ok: true, person: api.getPerson(personId) };
       },
 
@@ -243,6 +270,7 @@ export function createSqliteIdentityRepository({ db, now = Date.now }) {
             }
             // Voice profile refs: move.
             db.prepare('UPDATE voice_profile_refs SET person_id = ? WHERE person_id = ?').run(targetPersonId, source.person_id);
+            try { db.prepare('UPDATE face_templates SET person_id = ? WHERE person_id = ? AND workspace_id = ?').run(targetPersonId, source.person_id, workspaceId); } catch { /* face_identity migration absent */ }
             // Memory entity links: move, skipping ones that would duplicate an existing (memory_id, target, role) row.
             const links = db.prepare('SELECT * FROM memory_entity_links WHERE person_id = ?').all(source.person_id);
             for (const link of links) {
@@ -298,6 +326,11 @@ export function createSqliteIdentityRepository({ db, now = Date.now }) {
           const voiceMoveIds = new Set(splitPlan.voiceProfileIds ?? []);
           for (const id of voiceMoveIds) db.prepare('UPDATE voice_profile_refs SET person_id = ? WHERE voice_profile_id = ? AND person_id = ?').run(targetId, id, personId);
 
+          const faceMoveIds = new Set(splitPlan.faceProfileIds ?? []);
+          for (const id of faceMoveIds) {
+            try { db.prepare('UPDATE face_templates SET person_id = ? WHERE face_profile_id = ? AND person_id = ? AND workspace_id = ?').run(targetId, id, personId, workspaceId); } catch { /* face_identity migration absent */ }
+          }
+
           const evidenceMoveIds = new Set(splitPlan.evidenceIds ?? []);
           for (const id of evidenceMoveIds) db.prepare('UPDATE identity_evidence SET person_id = ? WHERE evidence_id = ? AND person_id = ?').run(targetId, id, personId);
 
@@ -329,7 +362,12 @@ export function createSqliteIdentityRepository({ db, now = Date.now }) {
       deletePerson(personId) {
         const person = readPersonRow(personId);
         if (!person) return { ok: false, errors: [`no person with id ${personId}`] };
-        db.prepare("UPDATE people SET status = 'deleted', identity_status = 'deleted', updated_at = ? WHERE person_id = ?").run(now(), personId);
+        const at = now();
+        db.prepare("UPDATE people SET status = 'deleted', identity_status = 'deleted', updated_at = ? WHERE person_id = ?").run(at, personId);
+        // Forgetting a person must also stop the camera recognising them —
+        // otherwise a deleted record keeps producing face evidence about
+        // somebody the user asked Roma to forget.
+        try { db.prepare("UPDATE face_templates SET status = 'deleted', deleted_at = ?, updated_at = ? WHERE person_id = ? AND workspace_id = ?").run(at, at, personId, workspaceId); } catch { /* face_identity migration absent */ }
         return { ok: true, person: api.getPerson(personId) };
       },
 
@@ -413,7 +451,7 @@ export function createSqliteIdentityRepository({ db, now = Date.now }) {
     };
 
     function rowToEvidence(row) {
-      return { evidenceId: row.evidence_id, schemaVersion: row.schema_version, evidenceType: row.evidence_type, personId: row.person_id, speakerLabel: row.speaker_label, sessionId: row.session_id, interactionId: row.interaction_id, turnId: row.turn_id, transcriptIds: fromJson(row.transcript_ids, []), voiceSampleRef: row.voice_sample_ref, provider: row.provider, providerModel: row.provider_model, score: row.score, confidence: row.confidence, quality: row.quality, decision: row.decision, reasonCode: row.reason_code, confirmedBy: row.confirmed_by, createdAt: row.created_at, expiresAt: row.expires_at, sensitivity: row.sensitivity };
+      return { evidenceId: row.evidence_id, schemaVersion: row.schema_version, evidenceType: row.evidence_type, personId: row.person_id, speakerLabel: row.speaker_label, sessionId: row.session_id, interactionId: row.interaction_id, turnId: row.turn_id, transcriptIds: fromJson(row.transcript_ids, []), voiceSampleRef: row.voice_sample_ref, faceProfileId: row.face_profile_id ?? null, provider: row.provider, providerModel: row.provider_model, score: row.score, confidence: row.confidence, quality: row.quality, decision: row.decision, reasonCode: row.reason_code, confirmedBy: row.confirmed_by, createdAt: row.created_at, expiresAt: row.expires_at, sensitivity: row.sensitivity };
     }
     function rowToRelationship(row) {
       return { relationshipId: row.relationship_id, schemaVersion: row.schema_version, fromEntityId: row.from_entity_id, toEntityId: row.to_entity_id, type: row.type, label: row.label, direction: row.direction, status: row.status, confidence: row.confidence, sensitivity: row.sensitivity, validFrom: row.valid_from, validUntil: row.valid_until, createdAt: row.created_at, updatedAt: row.updated_at, sourceEvidenceIds: fromJson(row.source_evidence_ids, []), linkedMemoryIds: fromJson(row.linked_memory_ids, []), supersedes: fromJson(row.supersedes, []), contradicts: fromJson(row.contradicts, []) };

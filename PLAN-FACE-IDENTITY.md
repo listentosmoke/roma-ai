@@ -45,7 +45,7 @@ The codebase was left with real seams, not vague intentions:
 - `src/inspector/faces.js` — the recognizer interface the Inspector already
   calls each cycle (`identify(frame, personTracks)`), currently returning
   "nobody" honestly.
-- `IDENTITY_EVIDENCE_TYPES` already contains `future_face_match`, parked at a
+- `IDENTITY_EVIDENCE_TYPES` contained `future_face_match` (now `face_match`), parked at a
   rank just below `explicit_self_identification` and above
   `tool_verified_identity`.
 - `person.faceProfileIds` exists on the schema and in the repository, reserved
@@ -85,17 +85,28 @@ templates.
 missing key fails the subsystem closed, that revoked consent freezes profiles,
 and that deleting a person cascades to their face templates.
 
-### F3 — evidence and resolution
+### F3 — evidence and resolution — **DONE**
 
-`future_face_match` becomes `face_match` — a name that lies about being
-hypothetical once it is not — keeping its rank position, plus `face_enrollment`
-paralleling `voice_enrollment`. The resolver gains face evidence through its
-existing interface. Cross-modal agreement (face and voice both pointing at one
-person) raises confidence; disagreement resolves to **unknown**, never to the
+`future_face_match` became `face_match`, plus `face_enrollment` paralleling
+`voice_enrollment`. The resolver takes `faceObservations` through its existing
+`resolve()` interface. Cross-modal agreement resolves with
+`cross_modal_agreement`; disagreement resolves to **unknown**, never to the
 higher-scoring guess.
 
-**Gate:** resolver tests, including the disagreement case, and a test that no
-face evidence can override `manual_confirmation` or `correction`.
+One thing the plan got wrong and building it corrected: face evidence cannot
+be treated as a general-purpose identity signal, because **the camera is worn
+and looks outward**. It answers "who is present", not "who is speaking" — the
+person in frame is usually the one being spoken *to*. So face evidence
+corroborates or contradicts a voice match and is otherwise recorded as
+presence (`presentPersonIds`); it never resolves a speaker alone and never
+breaks a voice tie. That is why `face_match` ranks below `voice_match` rather
+than beside it. The full case table is in [IDENTITY.md](IDENTITY.md)
+"Facial recognition in the resolver".
+
+**Gate: green.** `test/identity-face-evidence.test.js` — 18 tests including
+the disagreement case, the manual-confirmation and correction cases, the
+rejected-person case, and quality/threshold gating; plus the live runtime path
+in `test/identity-agent-integration.test.js`.
 
 ### F4 — the live path
 
