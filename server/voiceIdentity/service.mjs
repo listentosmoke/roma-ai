@@ -5,6 +5,7 @@ import { createTemplateCipher } from './crypto.mjs';
 import { createVoiceTemplateRepository } from '../repositories/voiceTemplateRepository.mjs';
 import { createOperationLedger } from '../repositories/operationLedger.mjs';
 import { createEntityResolver } from '../../src/identity/resolver.js';
+import { loadWorkerConfigEnv } from '../env.mjs';
 
 function normalizeAverage(previous, next, previousWeight) {
   const out = new Float32Array(previous.length);
@@ -384,6 +385,15 @@ export function createVoiceIdentityService({
 
 let sharedService = null;
 export function getSharedVoiceIdentityService() {
-  sharedService ??= createVoiceIdentityService();
+  // The key lives in .env, which Vite does NOT put into process.env — so a
+  // cipher defaulting to process.env reported a correctly-configured key as
+  // missing and failed the whole subsystem closed. The face path was already
+  // fixed this way (server/dataApiPlugin.mjs); this is the same fix for voice.
+  sharedService ??= createVoiceIdentityService({
+    cipher: createTemplateCipher({
+      key: loadWorkerConfigEnv().BIOMETRIC_ENCRYPTION_KEY,
+      keyVersion: Number(loadWorkerConfigEnv().BIOMETRIC_ENCRYPTION_KEY_VERSION ?? 1),
+    }),
+  });
   return sharedService;
 }

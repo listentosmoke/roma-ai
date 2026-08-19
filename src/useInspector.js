@@ -9,7 +9,12 @@ import { buildInspector } from './inspector/index.js';
 import { createCameraSource } from './inspector/video.js';
 import { inspectorConfig } from './inspector/config.js';
 
-export function useInspector() {
+/**
+ * @param {{ faces?: object }} [deps] — an optional face recognizer
+ *   (src/inspector/faces.js). Without one the Inspector labels nobody, which
+ *   is the honest default; src/useFaceIdentity.js supplies the real one.
+ */
+export function useInspector({ faces = null } = {}) {
   const inspectorRef = useRef(null);
   const sourceRef = useRef(null);
   const storeRef = useRef(null);
@@ -21,6 +26,9 @@ export function useInspector() {
   const [metrics, setMetrics] = useState(null);
   const [inspectorStatus, setInspectorStatus] = useState('Camera off');
   const [inspectorError, setInspectorError] = useState('');
+  // Held in a ref so a recognizer identity change never restarts the camera.
+  const facesRef = useRef(faces);
+  facesRef.current = faces;
 
   const stopWatching = useCallback(() => {
     inspectorRef.current?.stop();
@@ -36,7 +44,7 @@ export function useInspector() {
     try {
       const source = await createCameraSource(inspectorConfig.video);
       sourceRef.current = source;
-      const { inspector, store, buffer, deepAnalyzer } = await buildInspector({ source, onStatus: setInspectorStatus });
+      const { inspector, store, buffer, deepAnalyzer } = await buildInspector({ source, faces: facesRef.current ?? undefined, onStatus: setInspectorStatus });
       storeRef.current = store;
       frameBufferRef.current = buffer;
       deepAnalyzerRef.current = deepAnalyzer;
@@ -88,5 +96,12 @@ export function useInspector() {
     deepAnalyzer: deepAnalyzerRef,
     startWatching,
     stopWatching,
+    /**
+     * One frame from the live camera, or null when it is off. Used by
+     * explicit face enrollment — which is why it exists at all: enrollment
+     * must be a deliberate act against the camera the user can see running,
+     * never a background capture.
+     */
+    grabFrame: () => sourceRef.current?.grabFrame?.() ?? null,
   };
 }

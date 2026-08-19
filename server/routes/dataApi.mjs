@@ -347,7 +347,7 @@ export function createDataApiHandlers({ db, repositories, auth, voiceIdentity = 
       const evidenceResult = filterBySensitivity({ action: 'person.export', records: all.evidence.map((evidence) => ({ resourceId: evidence.evidenceId, sensitivity: evidence.sensitivity, workspaceId: principal.workspaceId, evidence })), resourceType: 'identity_evidence', principal });
       const relationshipResult = filterBySensitivity({ action: 'relationship.traverse', records: all.relationships.map((relationship) => ({ resourceId: relationship.relationshipId, sensitivity: relationship.sensitivity, workspaceId: principal.workspaceId, relationship })), resourceType: 'relationship', principal });
       sendJson(res, 200, {
-        people: peopleResult.allowed.map(({ person }) => ({ ...person, voiceProfileIds: [] })),
+        people: peopleResult.allowed.map(({ person }) => ({ ...person, voiceProfileIds: [], faceProfileIds: [] })),
         evidence: evidenceResult.allowed.map(({ evidence }) => evidence),
         relationships: relationshipResult.allowed.map(({ relationship }) => relationship),
       });
@@ -362,7 +362,7 @@ export function createDataApiHandlers({ db, repositories, auth, voiceIdentity = 
       else if (query.q) people = repo.findCandidates({ query: query.q, includeInactive: query.includeInactive === 'true', limit: Math.min(Number(query.limit) || DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT) });
       else people = repo.listPeople({ status: query.status, identityStatus: query.identityStatus, includeInactive: query.includeInactive === 'true' }).slice(0, MAX_LIST_LIMIT);
       const { allowed } = filterBySensitivity({ action: 'person.search', records: people.map((person) => ({ resourceId: person.personId, sensitivity: person.sensitivity, workspaceId: principal.workspaceId, person })), resourceType: 'person', principal });
-      sendJson(res, 200, { people: allowed.map(({ person }) => ({ ...person, voiceProfileIds: [] })) });
+      sendJson(res, 200, { people: allowed.map(({ person }) => ({ ...person, voiceProfileIds: [], faceProfileIds: [] })) });
     },
 
     async peopleMerge(req, res) {

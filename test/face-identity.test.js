@@ -315,3 +315,63 @@ test('a person who leaves is forgotten rather than remembered forever', async ()
   await recognizer.identify({}, tracks);
   assert.equal((await recognizer.identify({}, tracks))[0].personId, null, 'the label decays once the face is gone');
 });
+
+// ── enrollment capture (the pure half of the People-panel flow) ─────────────
+
+import { captureEnrollmentFrames, summarizeEnrollment, MAX_ENROLLMENT_IMAGES } from '../src/inspector/faceEnrollment.js';
+
+test('enrollment captures several spaced frames, not one snapshot', async () => {
+  // One frame binds a person to one pose and one lighting condition. The
+  // spacing is the point: it is what gives the averaged template variety.
+  const waits = [];
+  let grabbed = 0;
+  const images = await captureEnrollmentFrames({
+    grabFrame: () => ({ id: (grabbed += 1) }),
+    encodeFrame: async (frame) => `image_${frame.id}`,
+    count: 5,
+    intervalMs: 600,
+    wait: async (ms) => { waits.push(ms); },
+  });
+  assert.deepEqual(images, ['image_1', 'image_2', 'image_3', 'image_4', 'image_5']);
+  assert.deepEqual(waits, [600, 600, 600, 600], 'four gaps between five frames');
+});
+
+test('a frame the camera could not produce is skipped, not fatal', async () => {
+  let call = 0;
+  const images = await captureEnrollmentFrames({
+    grabFrame: () => { call += 1; return call === 2 ? null : { id: call }; },
+    encodeFrame: async (frame) => (frame.id === 3 ? null : `image_${frame.id}`),
+    count: 4,
+    wait: async () => {},
+  });
+  assert.deepEqual(images, ['image_1', 'image_4'], 'losing frames must not make the user start over');
+});
+
+test('an encoder that throws loses its frame and nothing else', async () => {
+  const images = await captureEnrollmentFrames({
+    grabFrame: () => ({}),
+    encodeFrame: async () => { throw new Error('canvas is tainted'); },
+    count: 3,
+    wait: async () => {},
+  });
+  assert.deepEqual(images, []);
+});
+
+test('enrollment never posts more images than the server will average', async () => {
+  const images = await captureEnrollmentFrames({
+    grabFrame: () => ({}),
+    encodeFrame: async () => 'image',
+    count: 50,
+    wait: async () => {},
+  });
+  assert.equal(images.length, MAX_ENROLLMENT_IMAGES);
+});
+
+test('the enrollment summary says what was dropped and why', () => {
+  assert.match(
+    summarizeEnrollment({ ok: true, samplesUsed: 3, rejected: ['no_face_detected', 'face_turned_away'] }, { captured: 5 }),
+    /Enrolled from 3 of 5 frames\. Dropped 2: no face in shot, the face was turned away\./,
+  );
+  assert.match(summarizeEnrollment({ ok: false, reasonCode: 'face_too_small' }), /too far from the camera.*Nothing was stored/);
+  assert.match(summarizeEnrollment(null), /did not complete/);
+});

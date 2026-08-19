@@ -121,6 +121,11 @@ export function usePeople({ memoryRepository = null, memoryCoordinator = null } 
     forgetPerson: async (args) => { const r = await coordinator.forgetPerson(args); refreshCounts(); return r; },
     enrollVoice: async (args) => { const r = await coordinator.enrollVoice(args); refreshCounts(); return r; },
     removeVoiceProfile: async (args) => { const r = await coordinator.removeVoiceProfile(args); refreshCounts(); return r; },
+    // Face enrollment happens SERVER-side (the browser never holds a template);
+    // these mirror the resulting profile reference and its evidence locally.
+    recordFaceEnrollment: (args) => { const r = coordinator.recordFaceEnrollment(args); refreshCounts(); return r; },
+    removeFaceProfile: (args) => { const r = coordinator.removeFaceProfile(args); refreshCounts(); return r; },
+    get: (personId) => coordinator.get(personId),
     clearAll: () => { coordinator.clearAll(); refreshCounts(); },
   };
 }

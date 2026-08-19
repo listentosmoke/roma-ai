@@ -9,6 +9,7 @@ import { useVoiceDelivery } from './useVoiceDelivery.js';
 import { useMemory } from './useMemory.js';
 import { usePeople } from './usePeople.js';
 import { useVoiceIdentity } from './useVoiceIdentity.js';
+import { useFaceIdentity } from './useFaceIdentity.js';
 import { useServerData } from './useServerData.js';
 import { useAgentTasks } from './useAgentTasks.js';
 import { runPreflight } from './server/preflight.js';
@@ -650,13 +651,17 @@ function PeoplePanel({ people }) {
   );
 }
 
-function VoicePersonRow({ person, people, voiceIdentity, voice, onShowEvidence, evidenceOpen, evidence }) {
+function VoicePersonRow({ person, people, voiceIdentity, voice, faceIdentity, cameraOn, grabFrame, onShowEvidence, evidenceOpen, evidence }) {
   const [renameText, setRenameText] = useState('');
   const [aliasText, setAliasText] = useState('');
   const [mergeSourceId, setMergeSourceId] = useState('');
   const profiles = voiceIdentity.profilesByPerson[person.personId] ?? [];
   const captureBusy = Boolean(voiceIdentity.operation);
   const providerReady = Boolean(voiceIdentity.status?.ready);
+  const faceProfiles = faceIdentity.profilesFor(person.personId);
+  const faceBusy = Boolean(faceIdentity.busyPersonId);
+  const faceBusyHere = faceIdentity.busyPersonId === person.personId;
+  const faceReady = faceIdentity.ready;
   const needsConfirmation = person.identityStatus === 'provisional' || person.identityStatus === 'candidate';
 
   useEffect(() => {
@@ -673,7 +678,7 @@ function VoicePersonRow({ person, people, voiceIdentity, voice, onShowEvidence, 
         <span className="muted">[{person.personId}] / confidence {Math.round(person.confidence * 100)}%</span>
       </div>
       {person.aliases.length > 0 && <p className="suggestion-meta muted">aliases: {person.aliases.map((alias) => alias.alias).join(', ')}</p>}
-      <p className="suggestion-meta muted">voice profiles: {profiles.length} / relationships: {person.relationshipIds.length} / linked memories: {person.linkedMemoryIds.length} / sensitivity: {person.sensitivity}</p>
+      <p className="suggestion-meta muted">voice profiles: {profiles.length} / face profiles: {faceProfiles.length} / relationships: {person.relationshipIds.length} / linked memories: {person.linkedMemoryIds.length} / sensitivity: {person.sensitivity}</p>
 
       <div className="suggestion-actions">
         {needsConfirmation && <button type="button" onClick={() => people.confirmMatch({ personId: person.personId })}>Confirm identity</button>}
@@ -704,7 +709,25 @@ function VoicePersonRow({ person, people, voiceIdentity, voice, onShowEvidence, 
         >
           Enroll Voice (I consent)
         </button>
+        <button
+          type="button"
+          disabled={!faceReady || !cameraOn || faceBusy}
+          title={!cameraOn ? 'Start the camera first — enrollment only ever uses the camera you can see running' : 'Capture a few frames and average them into one template'}
+          onClick={() => faceIdentity.enroll({ personId: person.personId, grabFrame }).catch(() => {})}
+        >
+          {faceBusyHere ? `Capturing ${faceIdentity.progress?.attempted ?? 0}/${faceIdentity.progress?.total ?? 0}...` : 'Enroll Face (I consent)'}
+        </button>
       </div>
+
+      {faceProfiles.map((profile) => (
+        <div className="suggestion-actions" key={profile.faceProfileId}>
+          <span className="muted">
+            face {profile.faceProfileId.slice(-6)} / {profile.status} / {profile.model} / {profile.sampleCount} sample{profile.sampleCount === 1 ? '' : 's'}
+            {profile.lastSimilarity != null ? ` / last match ${Math.round(profile.lastSimilarity * 100)}%` : ' / never matched'}
+          </span>
+          <button type="button" className="link-btn" onClick={() => faceIdentity.forgetFace({ personId: person.personId, faceProfileId: profile.faceProfileId }).catch(() => {})}>Forget this face</button>
+        </div>
+      ))}
 
       {profiles.map((profile) => (
         <div className="suggestion-actions" key={profile.voiceProfileId}>
@@ -730,7 +753,7 @@ function VoicePersonRow({ person, people, voiceIdentity, voice, onShowEvidence, 
   );
 }
 
-function VoicePeoplePanel({ people, voiceIdentity, voice }) {
+function VoicePeoplePanel({ people, voiceIdentity, voice, faceIdentity, inspector }) {
   const active = useMemo(() => people.list({}).slice(-20).reverse(), [people.counts]);
   const relationships = useMemo(() => people.listRelationships({}), [people.counts]);
   const [evidenceFor, setEvidenceFor] = useState(null);
@@ -750,6 +773,18 @@ function VoicePeoplePanel({ people, voiceIdentity, voice }) {
       <summary>People ({people.counts.total} total, {people.counts.active} active) - voice identity: {VOICE_MODE_LABEL[voiceIdentity.status?.mode] ?? voiceIdentity.status?.mode ?? 'checking'}</summary>
       <p className="suggestion-meta muted">Voice identity is probabilistic and is not authentication. Enrollment requires explicit consent. Raw samples are bounded and discarded; encrypted templates stay server-side and never enter browser storage.</p>
       <p className="suggestion-meta muted">Provider: {voiceIdentity.status?.provider ?? 'checking'} / {voiceIdentity.status?.model ?? 'checking'} / encryption: {voiceIdentity.status?.encryption?.configured ? 'ready' : 'missing key'} / microphone: {voice.listening ? 'streaming' : 'stopped'}</p>
+      <p className="suggestion-meta muted">Face: {faceIdentity.status?.provider ?? 'checking'} / {faceIdentity.status?.repo ?? 'checking'} / {faceIdentity.enrolledCount} enrolled / camera: {inspector.watching ? 'running' : 'off'} / recognition {inspector.watching && faceIdentity.enrolledCount > 0 ? 'active' : 'idle'}</p>
+      <div className="audio-warning">
+        <AlertTriangle size={14} />
+        <span>
+          Face recognition has <strong>no liveness check</strong> — a printed photograph may match — and consent enforcement is currently OFF in this build.
+          A match is evidence, never authentication: because the camera is worn and looks outward, a recognised face means someone is <em>present</em>, not that they are the one speaking.
+          Enrollment needs the camera you can see running, captures a few frames, and stores one averaged template server-side. No image is kept, by either side.
+        </span>
+      </div>
+      {faceIdentity.status && !faceIdentity.ready && <div className="error"><AlertTriangle size={16} /> Face recognition is unavailable: {faceIdentity.status.reason ?? 'the template store is not configured'}.</div>}
+      {faceIdentity.lastResult && <p className="suggestion-meta muted">Latest face result: {faceIdentity.lastResult}</p>}
+      {faceIdentity.error && <div className="error"><AlertTriangle size={16} /> {faceIdentity.error}</div>}
       {voiceIdentity.status?.developmentOnly && <div className="audio-warning"><AlertTriangle size={14} /><span>Development-only biometric operation: restricted to loopback. Production routes remain disabled until real token verification is configured.</span></div>}
       {voiceIdentity.status && !voiceIdentity.status.ready && <div className="error"><AlertTriangle size={16} /> Voice enrollment is unavailable. Check the server-only biometric key and provider health.</div>}
 
@@ -767,7 +802,7 @@ function VoicePeoplePanel({ people, voiceIdentity, voice }) {
 
       {active.length > 0 ? (
         <ul className="diagnostic-trace">
-          {active.map((person) => <VoicePersonRow key={person.personId} person={person} people={people} voiceIdentity={voiceIdentity} voice={voice} onShowEvidence={(id) => setEvidenceFor(evidenceFor === id ? null : id)} evidenceOpen={evidenceFor === person.personId} evidence={evidenceFor === person.personId ? evidence : null} />)}
+          {active.map((person) => <VoicePersonRow key={person.personId} person={person} people={people} voiceIdentity={voiceIdentity} voice={voice} faceIdentity={faceIdentity} cameraOn={inspector.watching} grabFrame={inspector.grabFrame} onShowEvidence={(id) => setEvidenceFor(evidenceFor === id ? null : id)} evidenceOpen={evidenceFor === person.personId} evidence={evidenceFor === person.personId ? evidence : null} />)}
         </ul>
       ) : <div className="empty">No people resolved yet.</div>}
 
@@ -949,11 +984,17 @@ function DevHarnessPanel({ onInject, lastSpokenText, log }) {
 
 function App() {
   const voice = useVoice();
-  const inspector = useInspector();
-  const voiceDelivery = useVoiceDelivery();
-  const proactive = useProactive({ sceneStore: inspector.sceneStore, speech: voiceDelivery.delivery });
+  // People come before the Inspector: the face recognizer the Inspector runs
+  // needs to turn person ids into names, and the camera must never start
+  // before the thing that decides whether recognition may run at all.
   const memory = useMemory();
   const people = usePeople({ memoryRepository: memory.repository, memoryCoordinator: memory.coordinator });
+  const cameraOnRef = useRef(false);
+  const faceIdentity = useFaceIdentity({ people, cameraOn: () => cameraOnRef.current });
+  const inspector = useInspector({ faces: faceIdentity.recognizer });
+  cameraOnRef.current = inspector.watching;
+  const voiceDelivery = useVoiceDelivery();
+  const proactive = useProactive({ sceneStore: inspector.sceneStore, speech: voiceDelivery.delivery });
   // identityMutationQueue lets consent revocation / profile deletion cancel
   // still-pending queued voice-profile mutations (see useVoiceIdentity.js).
   const voiceIdentity = useVoiceIdentity(voice, { romaSpeaking: voiceDelivery.voiceActivity.romaSpeaking, identityMutationQueue: people.mutationQueue });
@@ -1310,7 +1351,7 @@ function App() {
       <VoicePanel voiceDelivery={voiceDelivery} proactive={proactive} health={agent.health} />
       {import.meta.env.DEV && <DiagnosticsPanel agentEvents={agent.events} deliveryEvents={voiceDelivery.events} />}
       {import.meta.env.DEV && <MemoryPanel memory={memory} />}
-      {import.meta.env.DEV && <VoicePeoplePanel people={people} voiceIdentity={voiceIdentity} voice={voice} />}
+      {import.meta.env.DEV && <VoicePeoplePanel people={people} voiceIdentity={voiceIdentity} voice={voice} faceIdentity={faceIdentity} inspector={inspector} />}
       {import.meta.env.DEV && <ServerDataPanel memory={memory} people={people} serverData={serverData} preflight={preflight} />}
       {import.meta.env.DEV && <DevHarnessPanel onInject={injectHarnessSegment} lastSpokenText={voiceDelivery.lastSpoken?.text} log={harnessLog} />}
 
