@@ -5,11 +5,14 @@
 // repository is a bad place to keep those — so they live in a gitignored
 // directory and this script pulls them on demand.
 //
-// Provenance: official US government portraits, which are public domain
-// (17 U.S.C. § 105), mirrored in ageitgey/face_recognition's examples at a
-// pinned commit. Two different photographs of the SAME person are needed —
-// enrolling and verifying against the same file proves only that JPEG
-// decoding is deterministic.
+// Provenance: ageitgey/face_recognition's example assets, at pinned commits.
+// The stills are official US government portraits (public domain, 17 U.S.C.
+// § 105); the clips are the project's own example footage of a stage cast.
+//
+// Two DIFFERENT recordings of the same people are needed — enrolling and
+// verifying against the same file proves only that decoding is deterministic.
+// The clips also contain several people across scene cuts, which is what
+// makes correct REJECTION testable rather than assumed.
 //
 // Run: npm run fetch:face-fixtures
 
@@ -20,12 +23,18 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const FIXTURE_DIR = join(HERE, '..', 'test', 'fixtures', 'faces');
 
-const PINNED = 'https://raw.githubusercontent.com/ageitgey/face_recognition/e15120e6ba08cde1216607d2eb27e0eb0f0ea37c/examples';
+// Pinned per file: the stills and the clips were last touched by different
+// commits, and a ref that has one does not necessarily have the other.
+const RAW = 'https://raw.githubusercontent.com/ageitgey/face_recognition';
+const STILLS = 'e15120e6ba08cde1216607d2eb27e0eb0f0ea37c';
+const CLIPS = 'f37e636e22306d4efcc35fb1ef33d47183cfc5e7';
 
 export const FIXTURES = [
-  { file: 'enroll.jpg', url: `${PINNED}/obama.jpg`, note: 'official portrait — enrollment' },
-  { file: 'verify.jpg', url: `${PINNED}/obama2.jpg`, note: 'a DIFFERENT photograph of the same person — verification' },
-  { file: 'impostor.jpg', url: `${PINNED}/biden.jpg`, note: 'a different person — must not match' },
+  { file: 'enroll.mp4', url: `${RAW}/${CLIPS}/examples/short_hamilton_clip.mp4`, note: 'live footage — enrollment through the camera' },
+  { file: 'verify.mp4', url: `${RAW}/${CLIPS}/examples/hamilton_clip.mp4`, note: 'a DIFFERENT, longer recording of the same people — verification' },
+  { file: 'enroll.jpg', url: `${RAW}/${STILLS}/examples/obama.jpg`, note: 'official portrait — still-image fallback' },
+  { file: 'verify.jpg', url: `${RAW}/${STILLS}/examples/obama2.jpg`, note: 'a DIFFERENT photograph of the same person' },
+  { file: 'impostor.jpg', url: `${RAW}/${STILLS}/examples/biden.jpg`, note: 'a different person — must not match' },
 ];
 
 /** @returns {{ ready: boolean, missing: string[] }} */

@@ -28,10 +28,10 @@ const FAULT_URL_PATTERNS = {
   data_api_block: ['*api/data/*', '*api/session*', '*api/consent*'],
 };
 
-export async function createLab({ headless = true, seed = 1, log = (line) => console.log(line), keepBrowserOpen = false, worker = 'mock' } = {}) {
+export async function createLab({ headless = true, seed = 1, log = (line) => console.log(line), keepBrowserOpen = false, worker = 'mock', diskCacheDir = null } = {}) {
   const server = await startIsolatedServer({ worker });
   log(`  [lab] isolated server ${server.baseUrl} (db: disposable, tenant: ${server.workspaceId}, worker: ${worker})`);
-  const chrome = await launchChrome({ headless });
+  const chrome = await launchChrome({ headless, diskCacheDir });
   const cdp = await connectPage(chrome.port);
   await cdp.injectOnNewDocument(`window.__ROMA_SIMULATION__ = { seed: ${Number(seed)}, cameraFps: 12 };`);
   await cdp.navigate(server.baseUrl);

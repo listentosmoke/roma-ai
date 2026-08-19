@@ -9,7 +9,7 @@ design docs it links are accurate as of the same date.
 | Check | Result |
 |---|---|
 | Offline tests | **738/738 pass** (~3 s, `npm test`) |
-| Facial recognition | REAL and WIRED — InsightFace SCRFD+ArcFace server-side, enrollment from the People panel, `face_match`/`face_enrollment` evidence in the resolver, temporal voting. Measured: impostors max **0.216**; cross-photograph genuine **0.79** (server-side) and **0.77** through the live camera path; a real 3fps clip separated 3 distinct people across scene cuts. `verify:face-live` runs the whole browser leg through the virtual camera: **19/19**. **Consent enforcement OFF, templates unencrypted, no liveness — a photograph matches.** |
+| Facial recognition | REAL and WIRED — InsightFace SCRFD+ArcFace server-side, enrollment from the People panel, `face_match`/`face_enrollment` evidence in the resolver, temporal voting. Measured: impostors max **0.216**; genuine cross-photograph **0.79**, cross-**recording** through the live camera **0.65**; identity held 17/17 readings under motion; a stale name after a hard cut decays in **5.0 s**, then never returns. `verify:face-live` runs the whole browser leg on real video through the virtual camera: **25/25**. **Consent enforcement OFF, templates unencrypted, no liveness — a photo or a recording matches.** |
 | Deterministic simulations | **11/11 pass** (see §10) |
 | Virtual-hardware lab | **13/13 scenarios pass** closed-loop through real Deepgram/Groq/gate/TTS/COCO-SSD on virtual `MediaStream` devices, + 17-check smoke (`verify:virtual-lab`; see [VIRTUAL-HARDWARE.md](VIRTUAL-HARDWARE.md)) |
 | Wearer + dispatch round-trip | **5/5 assertions** with the mock worker (`agent_task_dispatch_roundtrip`, 3/3 consecutive) AND with the REAL Qwen CLI (`dispatch_real_qwen_smoke`, 2/2) — spoken request → classification → dispatch → completion, no progress chatter |
@@ -338,6 +338,11 @@ Read this before extending it — it is the non-obvious part:
 
 What is actually left, in order:
 
+0. **Note before running the lab:** COCO-SSD's ~20 MB of weights download at
+   ~117 KB/s here, so a cold Chrome profile takes ~331 s to start the camera
+   and looks like a hang. `createLab({ diskCacheDir })` shares just the HTTP
+   cache and cuts that to ~13 s (both measured). Only `verify:face-live` opts
+   in so far; the other lab scripts would benefit identically.
 1. **Physical hardware verification** — still the largest gap, and now the
    gating one for any accuracy claim. `HARDWARE-VERIFICATION.md` is the
    checklist; face accuracy is calibrated on public photographs, and

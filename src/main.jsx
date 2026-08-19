@@ -1126,7 +1126,7 @@ function App() {
             confidence: +(person.confidence ?? 0).toFixed(2),
           })),
         } : null,
-        inspectorStatus: inspector.status,
+        inspectorStatus: inspector.inspectorStatus,
         watching: inspector.watching,
         memoryCounts: memory.counts,
         memoryQueue: memory.queueStatus,

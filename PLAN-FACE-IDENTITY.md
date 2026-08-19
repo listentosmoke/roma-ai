@@ -121,11 +121,19 @@ is visibly gated on consent.
 ### F5 — adversarial and lab work — **partly done**
 
 `npm run verify:face-live` drives the whole browser leg through the virtual
-hardware lab: a photograph rendered into the virtual room, a REAL
+hardware lab on **real video**: a clip played into the virtual room, a REAL
 MediaStreamTrack, Roma's unmodified camera source, real COCO-SSD, the tracker,
 the recognizer, real SCRFD + ArcFace on the server, association back onto the
-person track, temporal voting, and the scene state the agent reads. 19 checks,
+person track, temporal voting, and the scene state the agent reads. 25 checks,
 including enrollment driven by clicking the actual panel button.
+
+Stills were the first version and were not enough: heads turning, motion blur,
+faces leaving and returning, and scene cuts are exactly the conditions
+perception gets wrong, and a photograph produces none of them. Enrollment now
+happens on one recording and recognition is checked on a different one
+(cross-recording similarity **0.65**, against 0.77 for two stills of one
+person), with a rejection window that was measured in the footage beforehand
+rather than assumed.
 
 It found the bug that mattered: **face matches could never be associated with
 a person track at all** (the two halves measure boxes in different units), and
@@ -134,18 +142,23 @@ produces. Nothing failed loudly — recognition just silently never happened.
 
 The verification also caught itself over-claiming. A first version reported a
 cross-photograph similarity of ~1.00, because votes carried over from the
-enrollment frames; it now empties the room between phases and asserts the score
-is in the cross-photograph range (measured: **0.77**, against 0.79 server-side).
+enrollment frames; it now clears the room between phases and asserts the score
+is in the cross-recording range.
+
+Moving to video surfaced one more real property: after a hard cut to a
+different person, the previous name rides the new face for **5.0 seconds**
+before voting drops it. That is the deliberate cost of not forgetting someone
+who turns their head — so it is measured and documented (README, IDENTITY.md)
+rather than quietly asserted away.
 
 **Photo-replay needs no exploit here — it IS the test.** The lab recognises a
 photograph of a person as that person, which is exactly the documented
 limitation: there is no liveness detection. That is stated in the README, in
 IDENTITY.md, and in the People panel itself rather than left to be discovered.
 
-Fixtures are photographs of real people and are NOT committed:
-`npm run fetch:face-fixtures` pulls public-domain official portraits into a
-gitignored directory, and the verification skips with instructions if they are
-absent.
+Fixtures are recordings and photographs of real people and are NOT committed:
+`npm run fetch:face-fixtures` pulls them into a gitignored directory, and the
+verification skips with instructions if they are absent.
 
 **Still open:** consent-enrollment and revocation scenarios (consent
 enforcement is off in this build, so there is nothing to assert yet), and

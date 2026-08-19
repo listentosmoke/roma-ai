@@ -9,9 +9,12 @@
 //   recognition_compatible   — adds detector-friendly drawn assets (stop sign,
 //                              clock, sports ball, tv…) and layered humanoid
 //                              figures; real COCO-SSD decides what it sees
-//   recorded_photorealistic  — a provided ImageBitmap/photo asset drawn into
-//                              the room (asset slot; provenance documented by
-//                              the scenario)
+//   recorded_photorealistic  — a provided ImageBitmap/photo asset, or a
+//                              playing <video>, drawn into the room (asset
+//                              slot; provenance documented by the scenario).
+//                              A video is what makes motion blur, head turns
+//                              and scene cuts reach the perception stack —
+//                              a still frame cannot produce any of them.
 
 const BACKGROUNDS = {
   office: { wall: '#b8b2a6', floor: '#8a7f6d', accent: '#6d7f8a' },
@@ -214,8 +217,17 @@ export function createVideoEngine({ width = 1280, height = 720, fps = 15 } = {})
       } else {
         const painter = OBJECT_PAINTERS[entry.item.kind];
         if (painter) painter(g, entry.item.x, entry.item.y, entry.item.width ?? 120, state.tick);
-        else if (entry.item.kind === 'photo_asset' && entry.item.asset) {
-          g.drawImage(entry.item.asset, entry.item.x, entry.item.y, entry.item.width ?? 320, (entry.item.width ?? 320) * (entry.item.asset.height / entry.item.asset.width));
+        else if ((entry.item.kind === 'photo_asset' || entry.item.kind === 'video_asset') && entry.item.asset) {
+          const asset = entry.item.asset;
+          // A <video> reports its size differently from an ImageBitmap, and
+          // reports nothing at all until it has decoded a frame — drawing it
+          // before then throws.
+          const sourceWidth = asset.videoWidth ?? asset.width ?? 0;
+          const sourceHeight = asset.videoHeight ?? asset.height ?? 0;
+          if (sourceWidth > 0 && sourceHeight > 0) {
+            const drawWidth = entry.item.width ?? 320;
+            g.drawImage(asset, entry.item.x, entry.item.y, drawWidth, drawWidth * (sourceHeight / sourceWidth));
+          }
         }
       }
     }

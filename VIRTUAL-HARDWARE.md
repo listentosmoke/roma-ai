@@ -244,14 +244,39 @@ claim — see [HARDWARE-VERIFICATION.md](HARDWARE-VERIFICATION.md).
 
 ## Facial recognition through the lab
 
-`npm run verify:face-live` (19 checks) runs the face path end to end through
-the virtual camera: a photograph drawn into the room with the video engine's
-`photo_asset` tier, a REAL MediaStreamTrack, Roma's unmodified camera source,
-real COCO-SSD person detection, the tracker, the face recognizer, real
-SCRFD + ArcFace on the isolated server, association of the match back onto the
-person track, temporal voting, and the scene state the agent reads.
-Enrollment is driven by clicking the actual People-panel button, not by
-calling an API behind the UI's back.
+`npm run verify:face-live` (25 checks) runs the face path end to end through
+the virtual camera on **real video**: a clip played into the room with the
+video engine's `video_asset` tier, a REAL MediaStreamTrack, Roma's unmodified
+camera source, real COCO-SSD person detection, the tracker, the face
+recognizer, real SCRFD + ArcFace on the isolated server, association of the
+match back onto the person track, temporal voting, and the scene state the
+agent reads. Enrollment is driven by clicking the actual People-panel button,
+not by calling an API behind the UI's back.
+
+Video rather than stills, because the failures that matter only exist in
+motion: heads turn, frames blur, faces leave and return, and a scene cut drops
+a different person into the same track. The two clips are different recordings
+of the same stage cast, and what is in them was **measured before any
+assertion was written** (ffmpeg sampling + embeddings + clustering at 0.50):
+one person alone at `enroll.mp4` t=3.5–7.5, the same person in 39 of
+`verify.mp4`'s 80 seconds, and a different person alone at t=26–28. So
+enrollment happens on one recording, recognition is checked on another, and
+the rejection window is a real person who really is not the enrolled one.
+
+Measured on this machine:
+
+| what | result |
+|---|---|
+| cross-**recording** similarity through the camera | **0.65** (stills of one person: 0.77) |
+| identity held across moving video | 17/17 readings |
+| stale name after a hard cut to a stranger | **gone in 5.0s**, then 0 wrong in 33 readings |
+| stranger given a new identity | never — an unknown face stays unknown |
+
+That 5-second window is design, not a defect: temporal voting needs repeated
+disagreement before dropping a name, so someone who turns their head is not
+forgotten instantly. The cost is that after a hard cut the previous name rides
+the new face for a few seconds. It is measured here rather than asserted away,
+because anyone reading the scene state needs to know it.
 
 It earned its place immediately: it found that **face matches could never be
 associated with a person track**, because tracks carry normalized boxes and
@@ -260,10 +285,21 @@ happened, and the unit test covering it had invented a track shape the tracker
 does not produce. This is the case for hardware-in-the-loop verification in one
 paragraph: the bug lived precisely in the seam that mocks agreed with.
 
-Two supporting pieces were added for it: `window.__romaSim.frameDataUrl()`
-(read-only; the render canvas is offscreen and never enters the DOM, so this
-is the only way to see what the camera actually saw) and an optional `z` on
-objects, for a drawable that must sit in front of a figure it overlaps.
+Supporting pieces added for it: `window.__romaSim.showVideo/seekVideo/
+removeVideo` (a playing `<video>` drawn into the room, with `loopStart`/
+`loopEnd` to hold one segment of a clip), `frameDataUrl()` (read-only; the
+render canvas is offscreen and never enters the DOM, so this is the only way
+to see what the camera actually saw), and an optional `z` on objects for a
+drawable that must sit in front of a figure it overlaps.
+
+**Detector model caching.** COCO-SSD's weights are ~20 MB from
+`storage.googleapis.com`, measured at ~117 KB/s from this machine, and every
+lab run gets a fresh Chrome profile with an empty cache — so the camera took
+**331 seconds** to start, every time, and looked exactly like a hang.
+`createLab({ diskCacheDir })` shares only the HTTP cache between runs (the
+profile stays disposable, so cookies, storage and permissions are still
+fresh): the same start then takes **13 seconds**, measured back to back. The
+face verification opts in; any other lab script can too, and probably should.
 
 Fixtures are photographs of real people and are never committed — `npm run
 fetch:face-fixtures` pulls public-domain official portraits into a gitignored

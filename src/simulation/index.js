@@ -74,6 +74,10 @@ export function activateSimulation() {
 
   const world = { people: new Map(), objects: new Map(), environment: null };
 
+  // Playing <video> elements backing video_asset objects, kept so a scenario
+  // can seek or stop one after it has been added.
+  const videoObjects = new Map();
+
   // Command surface for the Node-side Scenario Director. Bounded verbs only —
   // audio/video state changes and reads. No verb reaches a Roma subsystem.
   window.__romaSim = {
@@ -112,6 +116,64 @@ export function activateSimulation() {
     stopSpeaking(simulationId) { audioEngine.stopSpeaking(simulationId ?? null); return { ok: true }; },
 
     addObject(id, options) { world.objects.set(id, options); videoEngine.addObject(id, options); return { ok: true }; },
+
+    /**
+     * Play a real video file into the room, so the camera sees MOTION —
+     * head turns, motion blur, scene cuts, people entering and leaving. A
+     * still image cannot exercise any of that, and those are exactly the
+     * conditions perception gets wrong.
+     *
+     * `loopStart`/`loopEnd` hold one segment of the clip, which is how a
+     * scenario keeps a chosen person on screen for longer than the cut lasts.
+     * Muted, because this is a video source, not an audio one — room audio
+     * belongs to the audio engine.
+     */
+    async showVideo(id, { src, x = 0, y = 0, width = 1280, startAt = 0, loopStart = null, loopEnd = null, z = 100000 } = {}) {
+      const video = document.createElement('video');
+      video.src = src;
+      video.muted = true;
+      video.loop = true;
+      video.playsInline = true;
+      video.crossOrigin = 'anonymous';
+      await new Promise((resolve, reject) => {
+        video.onloadeddata = resolve;
+        video.onerror = () => reject(new Error(`could not load ${src}`));
+      });
+      if (startAt) video.currentTime = startAt;
+      if (loopStart != null && loopEnd != null) {
+        video.addEventListener('timeupdate', () => {
+          if (video.currentTime >= loopEnd || video.currentTime < loopStart) video.currentTime = loopStart;
+        });
+      }
+      await video.play();
+      videoObjects.set(id, video);
+      world.objects.set(id, { kind: 'video_asset', src, x, y, width });
+      videoEngine.addObject(id, { kind: 'video_asset', x, y, width, asset: video, z });
+      return { ok: true, duration: video.duration, width: video.videoWidth, height: video.videoHeight };
+    },
+
+    /** Jump a playing clip to a timestamp (and optionally re-aim its held segment). */
+    seekVideo(id, { to, loopStart = null, loopEnd = null } = {}) {
+      const video = videoObjects.get(id);
+      if (!video) return { ok: false, error: `no video ${id}` };
+      if (loopStart != null && loopEnd != null) {
+        video.onseeked = null;
+        video.addEventListener('timeupdate', () => {
+          if (video.currentTime >= loopEnd || video.currentTime < loopStart) video.currentTime = loopStart;
+        });
+      }
+      if (typeof to === 'number') video.currentTime = to;
+      return { ok: true, currentTime: video.currentTime };
+    },
+
+    removeVideo(id) {
+      const video = videoObjects.get(id);
+      if (video) { video.pause(); video.removeAttribute('src'); video.load(); videoObjects.delete(id); }
+      world.objects.delete(id);
+      videoEngine.removeObject(id);
+      return { ok: true };
+    },
+
     moveObject(id, options) { videoEngine.moveObject(id, options); return { ok: true }; },
     removeObject(id) { world.objects.delete(id); videoEngine.removeObject(id); return { ok: true }; },
     setLighting(level) { videoEngine.setLighting(level); return { ok: true }; },

@@ -153,7 +153,7 @@ npm run test:vision-live            # one real Groq vision call
 npm run test:tts-live               # one real TTS synthesis
 npm run stream:test -- <audio file> # stream a file through real Deepgram
 npm run fetch:face-fixtures         # face photos for the live check (gitignored)
-npm run verify:face-live            # virtual camera -> real face models (19 checks)
+npm run verify:face-live            # real video -> virtual camera -> face models (25 checks)
 npm run verify:qwen-worker          # real Qwen Code CLI, readonly (10 checks)
 npm run verify:qwen-worker -- --write  # …and write mode (15 checks)
 
@@ -218,5 +218,8 @@ node scripts/run-virtual-scenarios.mjs --family agent_env --real-worker
   auto-approves shell commands *inside its isolated worktree* — the isolation
   is the worktree plus the wearer's approval, not a sandbox
   ([AGENT-ENV.md](AGENT-ENV.md)).
-- No liveness check for faces: a printed photograph matches, which
+- No liveness check for faces: a photograph or a recording matches, which
   `npm run verify:face-live` demonstrates rather than hides.
+- After a hard scene cut, a recognised name lingers on the next face for about
+  five seconds before temporal voting drops it (measured). That is the cost of
+  not forgetting someone the moment they turn their head.

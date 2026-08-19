@@ -26,12 +26,22 @@ export function findChrome() {
 /**
  * @param {{ headless?: boolean, fakeDevices?: boolean, fakeAudioFile?: string, fakeVideoFile?: string, extraFlags?: string[] }} options
  */
-export async function launchChrome({ headless = true, fakeDevices = false, fakeAudioFile = null, fakeVideoFile = null, extraFlags = [] } = {}) {
+/**
+ * @param {object} [options]
+ * @param {string|null} [options.diskCacheDir] Share ONLY the HTTP cache
+ *   between runs, at this path. The profile stays disposable — cookies,
+ *   storage and permissions are still fresh every time — but a large model
+ *   download (TF.js + COCO-SSD is ~6 MB and can take minutes here) is paid
+ *   once instead of on every run. Opt-in, because a shared cache is shared
+ *   state, and a lab run that depends on a cold cache must not get one.
+ */
+export async function launchChrome({ headless = true, fakeDevices = false, fakeAudioFile = null, fakeVideoFile = null, diskCacheDir = null, extraFlags = [] } = {}) {
   const executable = findChrome();
   const profile = mkdtempSync(join(tmpdir(), 'roma-lab-profile-'));
   const flags = [
     ...(headless ? ['--headless=new'] : []),
     `--user-data-dir=${profile}`,
+    ...(diskCacheDir ? [`--disk-cache-dir=${diskCacheDir}`, '--disk-cache-size=268435456'] : []),
     '--remote-debugging-port=0',
     '--no-first-run', '--no-default-browser-check', '--disable-sync', '--disable-extensions',
     '--autoplay-policy=no-user-gesture-required',
