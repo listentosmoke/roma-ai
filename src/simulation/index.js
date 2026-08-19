@@ -124,6 +124,13 @@ export function activateSimulation() {
     endAudioTrack() { audioEngine.endTrack(); return { ok: true }; },
     endVideoTrack() { videoEngine.endTrack(); return { ok: true }; },
 
+    /**
+     * The exact pixels the virtual camera is producing, as a PNG data URL.
+     * Read-only, and the only way to see what Roma's camera actually saw —
+     * the render canvas is offscreen and never enters the DOM.
+     */
+    frameDataUrl() { return videoEngine.canvas.toDataURL('image/png'); },
+
     /** Bounded observability snapshot: engine facts + the app bridge's state. Read-only. */
     snapshot() {
       let app = {};

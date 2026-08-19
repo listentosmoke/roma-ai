@@ -205,7 +205,7 @@ export function createVideoEngine({ width = 1280, height = 720, fps = 15 } = {})
     g.fillRect(width * 0.05, height * 0.1, width * 0.22, height * 0.34); // window/panel
     // draw order = z order (later = closer = occludes)
     const drawables = [];
-    for (const [id, object] of state.objects) drawables.push({ z: object.y, kind: 'object', id, item: object });
+    for (const [id, object] of state.objects) drawables.push({ z: object.z ?? object.y, kind: 'object', id, item: object });
     for (const [id, person] of state.people) if (person.visible) drawables.push({ z: person.y, kind: 'person', id, item: person });
     drawables.sort((a, b) => a.z - b.z);
     for (const entry of drawables) {
@@ -260,8 +260,11 @@ export function createVideoEngine({ width = 1280, height = 720, fps = 15 } = {})
       if (typeof zoom === 'number') state.camera.zoom = zoom;
       if (typeof driftPxPerSecond === 'number') state.camera.driftPxPerSecond = driftPxPerSecond;
     },
-    addObject: (id, { kind, x = width / 2, y = height / 2, width: objectWidth = 140, asset = null }) => {
-      state.objects.set(id, { kind, x, y, width: objectWidth, asset });
+    // `z` overrides the default depth (the object's own y) for the rare case
+    // where a drawable must sit in front of a figure it overlaps — a photo
+    // asset held at head height, for instance.
+    addObject: (id, { kind, x = width / 2, y = height / 2, width: objectWidth = 140, asset = null, z = null }) => {
+      state.objects.set(id, { kind, x, y, width: objectWidth, asset, z });
     },
     moveObject: (id, { x, y }) => {
       const object = state.objects.get(id);

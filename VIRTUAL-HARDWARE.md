@@ -242,10 +242,35 @@ traffic. Physical testing remains recommended for hardware compatibility and
 real-room acoustic calibration, and **required** before any biometric-accuracy
 claim — see [HARDWARE-VERIFICATION.md](HARDWARE-VERIFICATION.md).
 
-## Toward facial recognition
+## Facial recognition through the lab
 
-The future face phase can reuse the lab directly: Tier-2/3 rendered or
-licensed face assets in the video engine, the same consent/encryption
-scenario patterns as voice identity, cross-modal face-plus-voice timing
-scenarios, and adversarial cases (photo-of-a-face replay) — all through the
-virtual camera with the same oracle discipline.
+`npm run verify:face-live` (19 checks) runs the face path end to end through
+the virtual camera: a photograph drawn into the room with the video engine's
+`photo_asset` tier, a REAL MediaStreamTrack, Roma's unmodified camera source,
+real COCO-SSD person detection, the tracker, the face recognizer, real
+SCRFD + ArcFace on the isolated server, association of the match back onto the
+person track, temporal voting, and the scene state the agent reads.
+Enrollment is driven by clicking the actual People-panel button, not by
+calling an API behind the UI's back.
+
+It earned its place immediately: it found that **face matches could never be
+associated with a person track**, because tracks carry normalized boxes and
+the server answers in pixels. Nothing threw — recognition silently never
+happened, and the unit test covering it had invented a track shape the tracker
+does not produce. This is the case for hardware-in-the-loop verification in one
+paragraph: the bug lived precisely in the seam that mocks agreed with.
+
+Two supporting pieces were added for it: `window.__romaSim.frameDataUrl()`
+(read-only; the render canvas is offscreen and never enters the DOM, so this
+is the only way to see what the camera actually saw) and an optional `z` on
+objects, for a drawable that must sit in front of a figure it overlaps.
+
+Fixtures are photographs of real people and are never committed — `npm run
+fetch:face-fixtures` pulls public-domain official portraits into a gitignored
+directory, and the verification skips with instructions when they are absent.
+
+Still to do here: consent-enrollment and revocation scenarios (consent
+enforcement is currently off, so there is nothing to assert yet) and
+cross-modal face-plus-voice timing. Photo replay needs no scenario of its
+own — the lab recognises a photograph as the person, which is the documented
+absence of liveness detection, demonstrated rather than hidden.

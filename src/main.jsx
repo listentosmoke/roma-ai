@@ -1118,6 +1118,13 @@ function App() {
           updatedAt: inspector.scene.updatedAt,
           objects: (inspector.scene.objects ?? []).slice(0, 15).map((o) => ({ label: o.label, position: o.position, visibility: o.visibility, confidence: +(o.confidence ?? 0).toFixed(2) })),
           people: (inspector.scene.people ?? []).length,
+          // Bounded identity view for the lab's face checks: who the camera
+          // has settled on, never a name the browser could not look up.
+          peopleIdentified: (inspector.scene.people ?? []).slice(0, 8).map((person) => ({
+            identity: person.identity ?? null,
+            personId: person.personId ?? null,
+            confidence: +(person.confidence ?? 0).toFixed(2),
+          })),
         } : null,
         inspectorStatus: inspector.status,
         watching: inspector.watching,

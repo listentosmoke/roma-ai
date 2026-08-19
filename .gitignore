@@ -24,3 +24,7 @@ data/*.db-*
 
 # stray scratch input, not part of the project
 transcriptfromyoutube.txt
+
+# Face fixtures are photographs of real people, fetched on demand
+# (npm run fetch:face-fixtures), never committed.
+test/fixtures/faces/

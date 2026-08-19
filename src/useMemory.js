@@ -96,6 +96,11 @@ export function useMemory() {
 
   useEffect(() => {
     refreshCounts(); // may already hold data from a previous session (server or localStorage fallback)
+    // Hydration from the server finishes AFTER this effect runs, and nothing
+    // else re-reads the counts — so without this the panel sat at zero until
+    // some unrelated event happened to refresh it, and a person who exists on
+    // the server was invisible (and could not be enrolled or corrected).
+    Promise.resolve(repository.ready?.()).then(refreshCounts).catch(() => {});
     return coordinator.subscribe((event) => {
       setEvents((existing) => [...existing, event].slice(-MAX_EVENTS));
       refreshCounts();

@@ -118,15 +118,38 @@ Enrollment is explicit, through the People panel, exactly like voice.
 **Gate:** the app runs with the camera on, no console errors, and identification
 is visibly gated on consent.
 
-### F5 — adversarial and lab work
+### F5 — adversarial and lab work — **partly done**
 
-Photo-replay is the obvious attack: hold up a photograph. Voice has an
-exact-fingerprint replay check that is explicitly *not* liveness; face gets the
-same honesty — duplicate-frame detection, documented as anti-replay, **not**
-anti-spoofing. Lab scenarios cover enrollment-with-consent, revocation, and
-cross-modal face+voice timing.
+`npm run verify:face-live` drives the whole browser leg through the virtual
+hardware lab: a photograph rendered into the virtual room, a REAL
+MediaStreamTrack, Roma's unmodified camera source, real COCO-SSD, the tracker,
+the recognizer, real SCRFD + ArcFace on the server, association back onto the
+person track, temporal voting, and the scene state the agent reads. 19 checks,
+including enrollment driven by clicking the actual panel button.
 
-**Gate:** `verify:virtual-lab` stays green, and the new scenarios pass.
+It found the bug that mattered: **face matches could never be associated with
+a person track at all** (the two halves measure boxes in different units), and
+the unit test that "covered" it had invented a track shape the tracker never
+produces. Nothing failed loudly — recognition just silently never happened.
+
+The verification also caught itself over-claiming. A first version reported a
+cross-photograph similarity of ~1.00, because votes carried over from the
+enrollment frames; it now empties the room between phases and asserts the score
+is in the cross-photograph range (measured: **0.77**, against 0.79 server-side).
+
+**Photo-replay needs no exploit here — it IS the test.** The lab recognises a
+photograph of a person as that person, which is exactly the documented
+limitation: there is no liveness detection. That is stated in the README, in
+IDENTITY.md, and in the People panel itself rather than left to be discovered.
+
+Fixtures are photographs of real people and are NOT committed:
+`npm run fetch:face-fixtures` pulls public-domain official portraits into a
+gitignored directory, and the verification skips with instructions if they are
+absent.
+
+**Still open:** consent-enrollment and revocation scenarios (consent
+enforcement is off in this build, so there is nothing to assert yet), and
+cross-modal face+voice timing in the lab.
 
 ## Honest limits, stated up front
 

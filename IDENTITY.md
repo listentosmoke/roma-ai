@@ -543,7 +543,11 @@ evidence, so a `face_match` always has a provenance chain ending in a
 deliberate human action.
 
 Tests: `test/identity-face-evidence.test.js` (the table above, case by case),
-plus the runtime path in `test/identity-agent-integration.test.js`.
+plus the runtime path in `test/identity-agent-integration.test.js`, plus
+`npm run verify:face-live` — which drives the whole browser leg (virtual
+camera -> real COCO-SSD -> tracker -> real SCRFD/ArcFace -> association ->
+temporal voting -> scene state) and is what caught face matches never being
+associated with a person track at all.
 
 ## Current limitations
 
