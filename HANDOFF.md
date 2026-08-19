@@ -8,7 +8,7 @@ design docs it links are accurate as of the same date.
 
 | Check | Result |
 |---|---|
-| Offline tests | **701/701 pass** (57 files, ~3 s, `npm test`) |
+| Offline tests | **704/704 pass** (57 files, ~3 s, `npm test`) |
 | Facial recognition | REAL — InsightFace SCRFD+ArcFace, flip-augmented, multi-sample enrollment. Measured: impostors max **0.216** (mean 0.041); same face survives jpeg q40 / 50% downscale / +25% brightness / 1.5px blur / 7° rotation at worst **0.951** → separation **0.735**, threshold 0.50. Cross-photograph: obama.jpg↔obama2.jpg **0.794**, impostors ≈0; both people in two_people.jpg identified correctly. Real 3fps video: 3 distinct people separated across scene cuts. Live HTTP enroll→identify verified. **Consent enforcement OFF, templates unencrypted, no liveness.** |
 | Deterministic simulations | **11/11 pass** (see §10) |
 | Virtual-hardware lab | **13/13 scenarios pass** closed-loop through real Deepgram/Groq/gate/TTS/COCO-SSD on virtual `MediaStream` devices, + 17-check smoke (`verify:virtual-lab`; see [VIRTUAL-HARDWARE.md](VIRTUAL-HARDWARE.md)) |
