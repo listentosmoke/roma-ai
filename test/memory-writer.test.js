@@ -208,3 +208,84 @@ test('diarized speaker labels are kept as transient source.speakerId, never auto
   assert.equal(stored.subjectId, 'person_matt'); // resolved subject the model proposed — independent field
   assert.notEqual(stored.subjectId, stored.source.speakerId);
 });
+
+// ── "the same fact" is not "the same heading" ──────────────────────────────
+//
+// applyCandidate force-merges a duplicate even when the model said store, and
+// that merge keeps the OLDER summary while raising its confidence. So what
+// counts as a duplicate decides whether a new fact survives.
+//
+// This is deliberately structural, not semantic. Measured on this repo's own
+// encoder: "Jon prefers tea to coffee" vs "Jon prefers coffee to tea" scores
+// 0.997 — higher than any genuinely reworded duplicate. Embeddings encode
+// topic, not truth conditions, and merging destroys a record.
+
+function candidateFor({ summary, object = {}, predicate = 'parking_location', confidence = 0.8 }) {
+  return {
+    action: 'store', type: 'fact', subjectId: 'person_user', predicate, object, summary,
+    confidence, importance: 0.5, tags: [], evidenceType: 'user_stated', reasonCode: 'user_stated_fact',
+  };
+}
+
+test('a contradicting fact filed under the same heading is NOT swallowed by the duplicate merge', () => {
+  const repository = createInMemoryRepository();
+  const pkg = { interactionId: 'i1', turnIds: ['t1'], transcriptIds: [] };
+  const first = applyCandidate(candidateFor({ summary: 'The user parked on the third floor.', object: { floor: 3 } }), { repository, interactionPackage: pkg });
+  assert.equal(first.action, 'store');
+
+  const second = applyCandidate(candidateFor({ summary: 'The user parked on the fourth floor.', object: { floor: 4 } }), { repository, interactionPackage: pkg });
+
+  assert.equal(second.action, 'store', 'a different floor is a different fact');
+  assert.equal(repository.searchStructured({ status: 'active' }).length, 2);
+  const original = repository.get(first.memory.memoryId);
+  assert.equal(original.summary, 'The user parked on the third floor.');
+  assert.equal(original.confidence, 0.8, 'and the stale one was not strengthened by it');
+});
+
+test('a genuine repeat still merges and strengthens, exactly as before', () => {
+  const repository = createInMemoryRepository();
+  const pkg = { interactionId: 'i1', turnIds: ['t1'], transcriptIds: [] };
+  const first = applyCandidate(candidateFor({ summary: 'The user parked on the third floor.', object: { floor: 3 } }), { repository, interactionPackage: pkg });
+  const repeat = applyCandidate(
+    candidateFor({ summary: 'They left the car on the third floor.', object: { floor: 3 } }),
+    { repository, interactionPackage: { interactionId: 'i2', turnIds: ['t2'], transcriptIds: [] } },
+  );
+
+  assert.equal(repeat.action, 'merge', 'same payload, different words — one memory, more evidence');
+  assert.equal(repeat.memory.memoryId, first.memory.memoryId);
+  assert.ok(repeat.memory.confidence > 0.8);
+  assert.equal(repository.searchStructured({ status: 'active' }).length, 1);
+});
+
+test('with no structured payload to compare, the summary decides', () => {
+  const repository = createInMemoryRepository();
+  const pkg = { interactionId: 'i1', turnIds: ['t1'], transcriptIds: [] };
+  applyCandidate(candidateFor({ summary: 'Matt is allergic to peanuts.', predicate: 'dietary_restriction' }), { repository, interactionPackage: pkg });
+
+  const negated = applyCandidate(
+    candidateFor({ summary: 'Matt is not allergic to peanuts.', predicate: 'dietary_restriction' }),
+    { repository, interactionPackage: pkg },
+  );
+  assert.equal(negated.action, 'store', 'a negation must never merge into what it contradicts');
+
+  const identical = applyCandidate(
+    candidateFor({ summary: 'Matt is allergic to peanuts!', predicate: 'dietary_restriction' }),
+    { repository, interactionPackage: pkg },
+  );
+  assert.equal(identical.action, 'merge', 'punctuation and case are not a different fact');
+});
+
+test('a correction still finds the record it corrects, differing content and all', () => {
+  const repository = createInMemoryRepository();
+  const pkg = { interactionId: 'i1', turnIds: ['t1'], transcriptIds: [] };
+  const first = applyCandidate(candidateFor({ summary: 'The user parked on the third floor.', object: { floor: 3 } }), { repository, interactionPackage: pkg });
+
+  const corrected = applyCandidate(
+    { ...candidateFor({ summary: 'The user parked on the fourth floor.', object: { floor: 4 } }), action: 'supersede', evidenceType: 'user_corrected' },
+    { repository, interactionPackage: pkg },
+  );
+
+  assert.equal(corrected.action, 'supersede');
+  assert.equal(corrected.supersededId, first.memory.memoryId, 'supersede targets the structural match, not only an exact duplicate');
+  assert.equal(repository.get(first.memory.memoryId).status, 'superseded');
+});

@@ -62,6 +62,41 @@ function buildRecordFields(candidate, interactionPackage, now) {
   };
 }
 
+/** Stable comparison of a memory's structured payload, key order aside. */
+function sameObject(left, right) {
+  const normalize = (value) => JSON.stringify(Object.fromEntries(Object.entries(value ?? {}).sort(([a], [b]) => a.localeCompare(b))));
+  return normalize(left) === normalize(right);
+}
+
+function normalizedSummary(text) {
+  return String(text ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+/**
+ * Is the candidate the SAME fact as an existing memory, or merely one filed
+ * under the same heading?
+ *
+ * This is deliberately not a semantic comparison. Measured on this repo's own
+ * encoder: "Jon prefers tea to coffee" and "Jon prefers coffee to tea" score
+ * **0.997**, "Matt is allergic to peanuts" against "Matt is NOT allergic to
+ * peanuts" scores 0.951, and "third floor" against "fourth floor" scores
+ * 0.948 — every one of them HIGHER than a genuine reworded duplicate, whose
+ * worst case was 0.391. Sentence embeddings encode topic, not truth
+ * conditions, and merging is destructive. So content equality is decided
+ * structurally:
+ *
+ *   - equal non-empty `object` payloads  -> the same fact, differently worded
+ *   - both objects empty                 -> fall back to the summary text
+ *
+ * The failure this chooses is a duplicate record, never a lost fact.
+ */
+export function isSameFact(existing, candidate) {
+  if (!sameObject(existing.object, candidate.object)) return false;
+  const hasPayload = Object.keys(existing.object ?? {}).length > 0;
+  if (hasPayload) return true;
+  return normalizedSummary(existing.summary) === normalizedSummary(candidate.summary);
+}
+
 /**
  * Apply ONE validated candidate against the repository. Never trusts the
  * model's `action` blindly — dedup, evidence-authority, and the
@@ -73,14 +108,22 @@ export function applyCandidate(candidate, { repository, interactionPackage, now 
     return { action: 'discard', memory: null, reasonCode: 'roma_generated_not_user_evidence' };
   }
 
-  const dedupMatch = repository.findRelated({ type: candidate.type, subjectId: candidate.subjectId, predicate: candidate.predicate })[0] ?? null;
+  const structuralMatch = repository.findRelated({ type: candidate.type, subjectId: candidate.subjectId, predicate: candidate.predicate })[0] ?? null;
+  // Same type+subject+predicate is a NARROWER claim than "the same fact".
+  // "parked on the third floor" and "parked on the fourth floor" share all
+  // three, and the merge below keeps the older summary while RAISING its
+  // confidence — so the new fact would vanish and the stale one would get
+  // stronger. A duplicate has to match on content too.
+  const dedupMatch = structuralMatch && isSameFact(structuralMatch, candidate) ? structuralMatch : null;
 
   if (candidate.action === 'discard') {
     return { action: 'discard', memory: null, reasonCode: candidate.reasonCode };
   }
 
   if (candidate.action === 'supersede') {
-    const old = candidate.supersedesMemoryId ? repository.get(candidate.supersedesMemoryId) : (dedupMatch ?? null);
+    // A correction still targets the structurally-matching memory: that is
+    // exactly the record being corrected, differing content and all.
+    const old = candidate.supersedesMemoryId ? repository.get(candidate.supersedesMemoryId) : (structuralMatch ?? null);
     if (!old) {
       // Nothing to supersede — fall through to a plain store instead of losing the evidence.
       const created = repository.create(buildRecordFields(candidate, interactionPackage, now));

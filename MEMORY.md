@@ -317,6 +317,34 @@ versus batched with a longer string). Vectors here are cached and compared
 across time, so that is silent noise between a stored memory and a query. fp32
 measures exactly 1.000000 and costs about a millisecond.
 
+### Why deduplication is NOT semantic
+
+The obvious next use for an encoder is "have I already stored this?" — and it
+was measured before being built, which is the only reason it was not built.
+
+| pair | cosine |
+|---|---|
+| "Jon prefers tea to coffee" / "Jon prefers **coffee to tea**" | **0.997** |
+| "Matt is allergic to peanuts" / "Matt is **not** allergic to peanuts" | 0.951 |
+| "parked on the **third** floor" / "parked on the **fourth** floor" | 0.948 |
+| worst genuine reworded duplicate | 0.391 |
+
+Every dangerous pair scores HIGHER than the weakest true duplicate. There is
+no threshold, because sentence embeddings encode topic, not truth conditions —
+and a merge is destructive: `applyCandidate` keeps the older summary and raises
+its confidence, so a bad merge deletes the new fact and strengthens the stale
+one.
+
+The measurement did expose a real defect in the dedup that already existed.
+`findRelated({ type, subjectId, predicate })` treats "the same heading" as "the
+same fact", so *"parked on the fourth floor"* merged into *"parked on the third
+floor"* and made it more confident. `isSameFact()` now requires content
+equality too: equal non-empty `object` payloads, or — when there is no
+structured payload — equal normalized summaries. A correction still targets the
+structural match, because that is exactly the record being corrected.
+
+The error this design chooses is a duplicate record, never a lost fact.
+
 ### Where vectors live
 
 Persisted server-side (migration 0008, `memory_embeddings`), not only in the
