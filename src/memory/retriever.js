@@ -11,7 +11,22 @@ import { createKeywordScorer } from './embeddings.js';
 const keywordScorer = createKeywordScorer();
 const RECENT_USE_WINDOW_MS = 2 * 60 * 1000;
 const RECENCY_HALF_LIFE_MS = 7 * 24 * 60 * 60 * 1000;
-const MIN_SIGNAL = 0.05;
+// "Is this related at all?" — and the answer depends on WHICH scorer produced
+// the number, because the two have completely different floors.
+//
+// Keyword overlap gives unrelated text exactly 0.00, so 0.05 was a fine bar.
+// Cosine similarity between normalized sentence embeddings does not: measured
+// on this encoder (npm run verify:embeddings), unrelated pairs land at
+// 0.06-0.08 — ABOVE the old bar — while the hardest true paraphrase scores
+// 0.31. Reusing 0.05 for semantic scores would have made "a memory must show
+// at least one real relevance signal" vacuous, quietly letting unrelated
+// memories into every turn's token budget.
+//
+// 0.20 sits between the two measured populations with room on both sides.
+const MIN_SIGNAL_BY_MATCH_TYPE = { keyword: 0.05, structured: 0.05, semantic: 0.20 };
+const MIN_SIGNAL = MIN_SIGNAL_BY_MATCH_TYPE.keyword;
+
+export { MIN_SIGNAL_BY_MATCH_TYPE };
 const CHARS_PER_TOKEN = 4;
 const TOKEN_OVERHEAD = 8;
 
@@ -75,6 +90,7 @@ export async function retrieve({
 
   if (signal?.aborted || !isStillCurrent()) return { memories: [], matchType, interactionId, aborted: true };
 
+  const minSignal = MIN_SIGNAL_BY_MATCH_TYPE[matchType] ?? MIN_SIGNAL;
   const scored = [];
   for (const memory of pool) {
     const textScore = semanticScores ? (semanticScores.get(memory.memoryId) ?? 0) : await textRelevance(memory, query, { embedder, repository });
@@ -82,7 +98,7 @@ export async function retrieve({
     const speakerBonus = memory.source?.speakerId && speakerIds.includes(memory.source.speakerId) ? 0.15 : 0;
     const goalBonus = currentGoals.some((g) => memory.tags.includes(g) || memory.predicate === g) ? 0.15 : 0;
     const sceneBonus = sceneTags.some((t) => memory.tags.includes(t)) ? 0.1 : 0;
-    const relevanceSignal = textScore > MIN_SIGNAL || entityBonus > 0 || speakerBonus > 0 || goalBonus > 0 || sceneBonus > 0;
+    const relevanceSignal = textScore > minSignal || entityBonus > 0 || speakerBonus > 0 || goalBonus > 0 || sceneBonus > 0;
     if (!relevanceSignal) continue;
 
     const recentlyUsed = memory.lastAccessedAt != null && time - memory.lastAccessedAt < RECENT_USE_WINDOW_MS;
@@ -91,7 +107,7 @@ export async function retrieve({
       - (recentlyUsed ? 0.15 : 0);
 
     const reasons = [];
-    if (textScore > MIN_SIGNAL) reasons.push(matchType === 'semantic' ? 'semantic_match' : 'keyword_match');
+    if (textScore > minSignal) reasons.push(matchType === 'semantic' ? 'semantic_match' : 'keyword_match');
     if (entityBonus) reasons.push('entity_match');
     if (speakerBonus) reasons.push('speaker_match');
     if (goalBonus) reasons.push('goal_match');

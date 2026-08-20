@@ -34,6 +34,7 @@
     "explore:virtual-boundaries": "node scripts/explore-simulation-boundaries.mjs",
     "verify:virtual-lab": "node scripts/verify-virtual-lab.mjs",
     "fetch:face-fixtures": "node scripts/fetch-face-fixtures.mjs",
+    "verify:embeddings": "node scripts/verify-embeddings.mjs",
     "verify:face-live": "node scripts/verify-face-live.mjs",
     "verify:qwen-worker": "node scripts/verify-qwen-worker.mjs",
     "test:vision-live": "node scripts/test-vision-live.mjs",

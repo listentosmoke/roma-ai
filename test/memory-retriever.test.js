@@ -152,3 +152,64 @@ test('an already-aborted signal discards the retrieval result', async () => {
   const result = await retrieve({ repository, query: 'Matt quote', signal: controller.signal });
   assert.equal(result.aborted, true);
 });
+
+// ── the relevance floor depends on WHICH scorer produced the number ────────
+
+/**
+ * An embedder with hand-built 2-D unit vectors, so a memory's cosine
+ * similarity to the query is exactly whatever the test says it is. Real
+ * encoders cannot be aimed like this, and the point here is the FLOOR, not
+ * the model.
+ */
+function createAimedEmbedder(similarityByText) {
+  return {
+    name: 'aimed-test-embedder',
+    model: 'aimed-v1',
+    dimensions: 2,
+    async embed(text) {
+      const target = similarityByText[text];
+      if (target == null) return [1, 0]; // the query itself
+      return [target, Math.sqrt(Math.max(0, 1 - target * target))];
+    },
+  };
+}
+
+test('unrelated memories do not sneak in just because cosine has a positive floor', async () => {
+  // Measured on the real encoder (npm run verify:embeddings): unrelated text
+  // scores 0.06-0.08, which is ABOVE the keyword scorer's 0.05 bar. Reusing
+  // that bar for semantic scores would put unrelated memories into every
+  // turn's token budget.
+  const repository = createInMemoryRepository();
+  const related = seedCommitment(repository, { summary: 'The user agreed to send Matt the Building 5 HVAC quote.' });
+  const unrelated = seedCommitment(repository, {
+    summary: 'The dog needs to go to the vet.', tags: [], predicate: 'vet_visit',
+    object: { animal: 'dog' },
+  });
+  const embedder = createAimedEmbedder({
+    'The user agreed to send Matt the Building 5 HVAC quote.': 0.31, // a real paraphrase's score
+    'The dog needs to go to the vet.': 0.08,                          // an unrelated pair's score
+  });
+
+  const result = await retrieve({ repository, query: 'that thing I promised', embedder });
+
+  const ids = result.memories.map((m) => m.memoryId);
+  assert.equal(result.matchType, 'semantic');
+  assert.ok(ids.includes(related.memoryId), 'a genuine paraphrase still clears the floor');
+  assert.ok(!ids.includes(unrelated.memoryId), 'an unrelated memory does not');
+});
+
+test('the keyword floor is unchanged, so nothing regresses when no embedder is configured', async () => {
+  const repository = createInMemoryRepository();
+  const commitment = seedCommitment(repository);
+  const result = await retrieve({ repository, query: 'quote for Matt' });
+  assert.equal(result.matchType, 'keyword');
+  assert.ok(result.memories.some((m) => m.memoryId === commitment.memoryId));
+});
+
+test('a semantic match is labeled as one, so the reason is never guessed at', async () => {
+  const repository = createInMemoryRepository();
+  seedCommitment(repository);
+  const embedder = createAimedEmbedder({ 'The user agreed to send Matt the Building 5 HVAC quote.': 0.62 });
+  const result = await retrieve({ repository, query: 'the promise about the building', embedder });
+  assert.match(result.memories[0].retrievalReason, /semantic_match/);
+});
