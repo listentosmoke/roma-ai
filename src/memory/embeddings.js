@@ -1,19 +1,28 @@
 // Provider-independent embedding interface for semantic memory retrieval.
 //
-// HONEST STATUS (see MEMORY.md "Embedding provider"): neither of this app's two
-// existing model providers exposes an embeddings endpoint in this codebase's
-// setup (Groq's chat-completions API here is used for text generation only;
-// Deepgram is STT/TTS only). Rather than fabricate an unverified third-party
-// integration, this phase ships:
-//   - a real, deterministic-but-honestly-labeled interface (createMockEmbedder)
-//     used ONLY in tests/simulation to exercise the semantic-search code path,
-//   - a keyword/token-overlap scorer (createKeywordScorer) that is the ACTUAL
-//     production relevance signal used by the retriever when no embedding
-//     provider is configured (which is always, today).
-// retriever.js reports which one produced each result's score (`matchType`) so
-// nothing here is ever silently presented as real semantic embedding retrieval.
+// STATUS: a real encoder now exists. It runs LOCALLY, in the server process
+// (server/textEmbeddings/provider.mjs — MiniLM through the transformers
+// runtime this repo already uses for voice and face), and the browser reaches
+// it through src/memory/proxyEmbedder.js. Memory text never leaves the machine.
+//
+// This file previously explained that neither Groq nor Deepgram exposes an
+// embeddings endpoint, so retrieval fell back to token overlap. That was true
+// and is no longer the whole picture: a local model needs no third-party
+// endpoint at all.
+//
+// What ships here, unchanged in shape:
+//   - createMockEmbedder — deterministic, honestly labeled, tests/simulation
+//     only. Never presented as semantic understanding.
+//   - createKeywordScorer — the fallback that still runs whenever no encoder
+//     is configured (a machine without the model, an unreachable server).
+// retriever.js reports which one produced each score (`matchType`), and its
+// relevance floor differs per scorer because their score distributions do —
+// see MIN_SIGNAL_BY_MATCH_TYPE there.
 
 const MAX_INPUT_CHARS = 2000;
+
+/** Matches the server route's own per-request cap (server/routes/embeddingsApi.mjs). */
+export const MAX_EMBED_BATCH = 64;
 
 function tokenize(text) {
   return (text ?? '')

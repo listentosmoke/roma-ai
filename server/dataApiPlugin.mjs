@@ -22,6 +22,8 @@ import { createFaceIdentityService } from './faceIdentity/service.mjs';
 import { createFaceTemplateRepository } from './faceIdentity/templateRepository.mjs';
 import { createTemplateCipher } from './voiceIdentity/crypto.mjs';
 import { createFaceApiHandlers, attachFaceApi } from './routes/faceApi.mjs';
+import { createEmbeddingsApiHandlers, attachEmbeddingsApi } from './routes/embeddingsApi.mjs';
+import { getSharedTextEmbeddingProvider } from './textEmbeddings/provider.mjs';
 
 /**
  * Is this process a test run? `node --test` sets NODE_TEST_CONTEXT in the
@@ -118,7 +120,14 @@ export function createDataApi({ dbPath = process.env.ROMA_DB_PATH || undefined, 
   else if (!faceDescribed.requireConsent) log.warn('[face-identity] enabled with CONSENT ENFORCEMENT OFF — templates can be enrolled without a consent record. Set FACE_IDENTITY_REQUIRE_CONSENT=1 to restore it.');
   const faceHandlers = createFaceApiHandlers({ faceIdentity, auth, identityRepository: repositories.identityRepository, auditRepository: repositories.auditRepository });
 
-  return { db, auth, repositories, handlers, voiceIdentity, taskStore, engineeringMemory, dispatcher, agentTaskHandlers, faceIdentity, faceHandlers };
+  // ── text embeddings ──────────────────────────────────────────────────────
+  // Loaded lazily on first use, like the other two encoders, so startup never
+  // waits on a model. Memory text is embedded here rather than anywhere else
+  // precisely so it never leaves the machine.
+  const textEmbeddings = getSharedTextEmbeddingProvider();
+  const embeddingsHandlers = createEmbeddingsApiHandlers({ provider: textEmbeddings, auth });
+
+  return { db, auth, repositories, handlers, voiceIdentity, taskStore, engineeringMemory, dispatcher, agentTaskHandlers, faceIdentity, faceHandlers, textEmbeddings, embeddingsHandlers };
 }
 
 export function dataApiPlugin({ voiceIdentity = getSharedVoiceIdentityService() } = {}) {
@@ -128,6 +137,7 @@ export function dataApiPlugin({ voiceIdentity = getSharedVoiceIdentityService() 
     attachDataApi(server.middlewares, api.handlers);
     attachAgentTaskApi(server.middlewares, api.agentTaskHandlers);
     attachFaceApi(server.middlewares, api.faceHandlers);
+    attachEmbeddingsApi(server.middlewares, api.embeddingsHandlers);
   };
   return {
     name: 'roma-data-api',

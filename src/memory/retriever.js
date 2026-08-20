@@ -12,18 +12,27 @@ const keywordScorer = createKeywordScorer();
 const RECENT_USE_WINDOW_MS = 2 * 60 * 1000;
 const RECENCY_HALF_LIFE_MS = 7 * 24 * 60 * 60 * 1000;
 // "Is this related at all?" — and the answer depends on WHICH scorer produced
-// the number, because the two have completely different floors.
+// the number, because the two have completely different distributions.
 //
 // Keyword overlap gives unrelated text exactly 0.00, so 0.05 was a fine bar.
-// Cosine similarity between normalized sentence embeddings does not: measured
-// on this encoder (npm run verify:embeddings), unrelated pairs land at
-// 0.06-0.08 — ABOVE the old bar — while the hardest true paraphrase scores
-// 0.31. Reusing 0.05 for semantic scores would have made "a memory must show
-// at least one real relevance signal" vacuous, quietly letting unrelated
-// memories into every turn's token budget.
+// Cosine similarity between normalized sentence embeddings never reaches 0:
+// measured on this encoder (npm run verify:embeddings), clearly unrelated
+// pairs land at 0.06-0.08 — ABOVE the old bar. Reusing 0.05 would have made
+// "a memory must show at least one real relevance signal" vacuous.
 //
-// 0.20 sits between the two measured populations with room on both sides.
-const MIN_SIGNAL_BY_MATCH_TYPE = { keyword: 0.05, structured: 0.05, semantic: 0.20 };
+// Picking the replacement needed real queries, not paraphrase pairs. Measured
+// over question-to-memory retrieval, which is what actually happens here:
+//
+//   clearly unrelated                    0.06 - 0.08
+//   the memory that answers the question 0.16 - 0.67
+//   topically adjacent distractors       up to 0.44
+//
+// So there is no clean absolute separation, and a floor cannot be made to do
+// the work of ranking. This is a NOISE GATE: 0.12 sits above everything
+// measurably unrelated and below the weakest correct answer, and everything
+// past it is ranked rather than trusted. An earlier value of 0.20, chosen from
+// paraphrase pairs alone, would have silently suppressed a correct answer.
+const MIN_SIGNAL_BY_MATCH_TYPE = { keyword: 0.05, structured: 0.05, semantic: 0.12 };
 const MIN_SIGNAL = MIN_SIGNAL_BY_MATCH_TYPE.keyword;
 
 export { MIN_SIGNAL_BY_MATCH_TYPE };

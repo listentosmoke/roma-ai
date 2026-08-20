@@ -38,6 +38,11 @@ in-process Node server that holds every API key and a SQLite database.
   echo suppression, live voice catalog.
 - **Episodic memory** — evidence-ranked structured records with corrections,
   supersession chains, and ranked retrieval, stored server-side in SQLite.
+  Retrieval is **semantic**: a local MiniLM encoder runs server-side (text
+  never leaves the machine), so "when is that write-up due" finds "the Q3
+  report is due Friday" with no shared words. Measured 5/7 against keyword
+  overlap's 2/7 on real questions (`npm run verify:embeddings`); without the
+  model, retrieval falls back to keyword scoring rather than failing.
 - **Entity resolution + relationships** — stable person records, aliases,
   evidence chains; diarization labels are never auto-promoted to identities.
 - **Facial recognition** — local InsightFace (SCRFD + ArcFace, 512-d) running
@@ -131,7 +136,7 @@ untrusted users as-is.
 ## Tests, simulations, build
 
 ```bash
-npm test                  # full offline suite (737 tests, ~3s, no network/keys)
+npm test                  # full offline suite (757 tests, ~3s, no network/keys)
 npm run build             # production bundle (dist/)
 npm run preflight         # server-side startup health check
 
@@ -153,6 +158,7 @@ npm run test:vision-live            # one real Groq vision call
 npm run test:tts-live               # one real TTS synthesis
 npm run stream:test -- <audio file> # stream a file through real Deepgram
 npm run fetch:face-fixtures         # face photos for the live check (gitignored)
+npm run verify:embeddings           # local text encoder + retrieval benchmark (20 checks)
 npm run verify:face-live            # real video -> virtual camera -> face models (25 checks)
 npm run verify:qwen-worker          # real Qwen Code CLI, readonly (10 checks)
 npm run verify:qwen-worker -- --write  # …and write mode (15 checks)
@@ -204,7 +210,8 @@ node scripts/run-virtual-scenarios.mjs --family agent_env --real-worker
   [INSPECTOR.md](INSPECTOR.md)). Face accuracy is calibrated on public
   photographs, not on the people who will actually use it, and demographic
   performance is unmeasured here.
-- No real embedding provider — memory retrieval is keyword/structured.
+- Memory retrieval is semantic but imperfect: 5/7 on the measured question
+  set, and it misranks when a distractor shares the subject.
 - Voice-identity calibration is tiny and local; replay checking is a
   narrow heuristic, not liveness.
 - The complete software integration path is verified through the virtual

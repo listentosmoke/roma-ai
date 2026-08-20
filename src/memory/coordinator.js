@@ -30,6 +30,11 @@ function historyChain(repository, memoryId, depth = 0) {
 }
 
 export function createMemoryCoordinator({ repository, provider, now = Date.now, embedder = null } = {}) {
+  // `embedder` may be a live getter, because the real one is only available
+  // after the server reports which model it holds — and the coordinator is
+  // built synchronously, before that answer arrives. Passing an object still
+  // works exactly as before.
+  const currentEmbedder = typeof embedder === 'function' ? embedder : () => embedder;
   const listeners = new Set();
   function emit(event) {
     const full = { at: now(), ...event };
@@ -70,7 +75,7 @@ export function createMemoryCoordinator({ repository, provider, now = Date.now, 
 
     /** Retrieval for the NEXT turn's context assembly. Never bypasses the agent/Speech Gate — output is context only. */
     async retrieve(query) {
-      const result = await retrieverRetrieve({ repository, embedder, ...query });
+      const result = await retrieverRetrieve({ repository, embedder: currentEmbedder(), ...query });
       emit({
         type: 'memory-retrieved',
         query: query.query ?? '',
@@ -102,7 +107,7 @@ export function createMemoryCoordinator({ repository, provider, now = Date.now, 
 
     /** Explicit "forget that…" — deletes only when a single candidate is clearly the best match; otherwise returns bounded candidates for disambiguation. */
     async forget(query, options = {}) {
-      const result = await retrieverRetrieve({ repository, embedder, query, maximumMemories: 5, includeHistorical: false, ...options });
+      const result = await retrieverRetrieve({ repository, embedder: currentEmbedder(), query, maximumMemories: 5, includeHistorical: false, ...options });
       const pick = pickTarget(result.memories);
       if (pick.outcome === 'not_found') { emit({ type: 'memory-forget-not-found', query }); return { outcome: 'not_found' }; }
       if (pick.outcome === 'ambiguous') {
@@ -121,7 +126,7 @@ export function createMemoryCoordinator({ repository, provider, now = Date.now, 
      * memory, per the evidence-authority rule in writer.js.
      */
     async correct(query, correctedText, { interactionId = null, turnId = null, speakerId = null, signal } = {}) {
-      const found = await retrieverRetrieve({ repository, embedder, query, maximumMemories: 5, ...{} });
+      const found = await retrieverRetrieve({ repository, embedder: currentEmbedder(), query, maximumMemories: 5, ...{} });
       const pick = pickTarget(found.memories);
       if (pick.outcome === 'ambiguous') {
         emit({ type: 'memory-correct-ambiguous', query, candidateIds: pick.candidates.map((c) => c.memoryId) });
@@ -197,6 +202,6 @@ export function createMemoryCoordinator({ repository, provider, now = Date.now, 
       emit({ type: 'memory-cleared-all' });
     },
     exportAll() { return repository.exportAll(); },
-    embedderStatus() { return { configured: Boolean(embedder), name: embedder?.name ?? null }; },
+    embedderStatus() { const active = currentEmbedder(); return { configured: Boolean(active), name: active?.name ?? null, model: active?.model ?? null, dimensions: active?.dimensions ?? null }; },
   };
 }

@@ -65,6 +65,7 @@ export function createTextEmbeddingProvider({
   let pipelinePromise = null;
   let loadError = null;
   let dimensions = null;
+  let lastLatencyMs = 0;
   let active = 0;
   const queue = [];
 
@@ -132,12 +133,18 @@ export function createTextEmbeddingProvider({
    * candidate pool at once on a cold cache, and doing that one HTTP round trip
    * (and one model call) at a time is the difference between usable and not.
    *
+   * Returns a BARE array of vectors, matching `embed`'s bare vector and the
+   * proxy embedder's identical signature — one contract, so a caller cannot be
+   * written against the wrong one. (It briefly returned a metadata object here
+   * and an array there; the repository indexed into the object, got undefined,
+   * and every similarity silently became 0.)
+   *
    * @param {string[]} texts
-   * @returns {Promise<{ vectors: number[][], model: string, dimensions: number, latencyMs: number }>}
+   * @returns {Promise<number[][]>}
    */
   async function embedMany(texts) {
     const inputs = (Array.isArray(texts) ? texts : [texts]).map(normalizeText);
-    if (!inputs.length) return { vectors: [], model: modelId, dimensions: dimensions ?? 0, latencyMs: 0 };
+    if (!inputs.length) return [];
     if (inputs.length > MAX_BATCH) throw new Error(`Embedding batch of ${inputs.length} exceeds the ${MAX_BATCH} limit.`);
     // An empty string still has to yield a vector of the right shape, or the
     // caller's cache would store a hole it can never match against.
@@ -153,13 +160,14 @@ export function createTextEmbeddingProvider({
       const [rows, cols, dims] = states.dims;
       const vectors = pool(states.data, encoded.attention_mask.data, rows, cols, dims);
       dimensions = dims;
-      return { vectors, model: modelId, dimensions: dims, latencyMs: now() - startedAt };
+      lastLatencyMs = now() - startedAt;
+      return vectors;
     });
   }
 
   async function embed(text) {
-    const { vectors } = await embedMany([text]);
-    return vectors[0] ?? [];
+    const [vector] = await embedMany([text]);
+    return vector ?? [];
   }
 
   return {
@@ -173,6 +181,8 @@ export function createTextEmbeddingProvider({
       await embedMany(['warmup']);
       return { ok: true, model: modelId, dimensions };
     },
+    /** Duration of the most recent model call, for the route's response. */
+    get lastLatencyMs() { return lastLatencyMs; },
     describe() {
       return {
         provider: 'local_minilm',

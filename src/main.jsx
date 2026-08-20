@@ -430,7 +430,7 @@ function MemoryPanel({ memory }) {
   return (
     <details className="agent-debug">
       <summary>
-        Memory ({memory.counts.total} total, {memory.counts.active} active) — embeddings: {memory.embedderStatus.configured ? memory.embedderStatus.name : 'none (keyword/structured fallback)'}
+        Memory ({memory.counts.total} total, {memory.counts.active} active) — retrieval: {memory.embedderStatus.configured ? `semantic (${memory.embedderStatus.model}, ${memory.embedderStatus.dimensions}-d, local)` : 'keyword/structured — no encoder configured'}
       </summary>
       {Object.keys(memory.counts.byType).length > 0 && (
         <p className="suggestion-meta muted">

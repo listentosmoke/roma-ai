@@ -135,18 +135,25 @@ function createRepositoryCore({ load, save, loadEmbeddings, saveEmbeddings, now 
       const pool = candidates ?? readAll().filter((m) => m.status === 'active');
       const cache = readEmbeddings();
       const queryVector = await embedder.embed(text);
-      const results = [];
-      let cacheChanged = false;
-      for (const memory of pool) {
-        let entry = cache[memory.memoryId];
-        if (!embeddingMatchesEmbedder(entry, embedder)) {
-          const vector = await embedder.embed(memory.summary);
-          entry = { vector, model: embedder.model, dimensions: embedder.dimensions, computedAt: now() };
-          cache[memory.memoryId] = entry;
-          cacheChanged = true;
-        }
-        results.push({ memory, score: cosineSimilarity(queryVector, entry.vector) });
+
+      // Everything missing from the cache is embedded in ONE call when the
+      // embedder supports it. With a real encoder behind an HTTP boundary, the
+      // per-memory loop this replaces was one round trip per memory on every
+      // cold cache — the difference between a retrieval that fits in a turn
+      // and one that does not.
+      const stale = pool.filter((memory) => !embeddingMatchesEmbedder(cache[memory.memoryId], embedder));
+      let cacheChanged = stale.length > 0;
+      if (stale.length) {
+        const vectors = embedder.embedMany
+          ? await embedder.embedMany(stale.map((memory) => memory.summary))
+          : await Promise.all(stale.map((memory) => embedder.embed(memory.summary)));
+        const at = now();
+        stale.forEach((memory, index) => {
+          cache[memory.memoryId] = { vector: vectors[index], model: embedder.model, dimensions: embedder.dimensions, computedAt: at };
+        });
       }
+
+      const results = pool.map((memory) => ({ memory, score: cosineSimilarity(queryVector, cache[memory.memoryId].vector) }));
       if (cacheChanged) writeEmbeddings(cache);
       return results.sort((a, b) => b.score - a.score).slice(0, limit);
     },

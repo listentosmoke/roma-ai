@@ -16,6 +16,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createMemoryCoordinator } from './memory/coordinator.js';
+import { createServerEmbedderIfAvailable } from './memory/proxyEmbedder.js';
 import { createLocalStorageRepository } from './memory/repository.js';
 import { createProxyProvider, createProvider } from './agent/provider.js';
 import { memoryConfig } from './memory/config.js';
@@ -53,11 +54,31 @@ export function useMemory() {
   activeRepositoryRef.current ??= createServerBackedMemoryRepository({ dataClient, mutationQueue, onSyncError: (op, error) => console.warn(`[memory] server sync failed (${op}):`, error.message) });
   const repository = useMemo(() => createDelegatingRepository(activeRepositoryRef), []);
 
+  // The real encoder lives on the server, so whether one exists is only known
+  // after a round trip — while the coordinator is built synchronously. It is
+  // therefore handed a GETTER: retrieval uses token overlap until the answer
+  // arrives, then semantic scoring, with no rebuild and no lost state.
+  const embedderRef = useRef(null);
+  const [embedderStatus, setEmbedderStatus] = useState({ configured: false, name: null, model: null, dimensions: null });
+
   const coordinator = useMemo(() => {
     // Delegating provider so a health check can swap proxy -> mock without
     // rebuilding the coordinator (same pattern as useAgent.js/useProactive.js).
     const provider = { infer: (request) => activeProviderRef.current.infer(request) };
-    return createMemoryCoordinator({ repository, provider });
+    return createMemoryCoordinator({ repository, provider, embedder: () => embedderRef.current });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    createServerEmbedderIfAvailable({ dataClient })
+      .then((embedder) => {
+        if (cancelled || !embedder) return;
+        embedderRef.current = embedder;
+        setEmbedderStatus(coordinator.embedderStatus());
+      })
+      .catch(() => { /* keyword retrieval is the honest fallback, not an error */ });
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -123,7 +144,7 @@ export function useMemory() {
     setHealth, // App forwards useAgent's /api/health result (same hook-order break as useProactive/useVoiceDelivery)
     events,
     counts,
-    embedderStatus: coordinator.embedderStatus(),
+    embedderStatus, // state, not a call: it changes once the server answers
     list: (filters) => coordinator.list(filters),
     explain: (id) => coordinator.explain(id),
     deleteMemory: (id) => { const ok = coordinator.deleteMemory(id); refreshCounts(); return ok; },

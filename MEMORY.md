@@ -57,7 +57,8 @@ call directly.
   model). Pure, no throws — invalid data always fails safely.
 - `embeddings.js` — `createMockEmbedder()` (deterministic hashed embedder, for
   tests/simulation only), `createKeywordScorer()` (the real production
-  relevance signal today — see "Embedding provider" below), `cosineSimilarity`,
+  relevance signal when no encoder is configured — see "Embedding provider"
+  below), `cosineSimilarity`,
   `embeddingMatchesEmbedder`.
 - `repository.js` — `createInMemoryRepository()` and
   `createLocalStorageRepository({storageKey})`, sharing one core
@@ -262,25 +263,66 @@ paragraph above.
 
 ## Embedding provider
 
-**Honest status:** neither of this app's real providers (Groq for chat
-completions, Deepgram for STT/TTS) exposes an embeddings endpoint in this
-codebase's configuration. Rather than fabricate an unverified third-party
-integration for this phase:
-- `createMockEmbedder()` — a real, deterministic (hashed bag-of-words)
-  implementation of the embedding interface, used **only** in tests/simulation
-  to exercise the semantic-search code path end to end.
-- `createKeywordScorer()` (token-overlap / Jaccard-like scoring) is the
-  **actual production relevance signal** used by the retriever whenever no
-  embedder is configured — which is always, today, in the running app.
+**Status: a real encoder ships, and it runs locally.** This section used to
+say that neither Groq nor Deepgram exposes an embeddings endpoint, so
+retrieval fell back to token overlap. That was true and became beside the
+point: Roma already runs local models server-side for voice and face, so a
+sentence encoder needs no third-party endpoint at all.
 
-`retriever.js`'s result carries `matchType: 'semantic' | 'keyword' |
-'structured' | 'none'` so this is never silently misrepresented — the dev
-Memory panel and every retrieval event show which one actually ran. Stored
-embeddings (if a real embedder is ever configured) carry their `model` +
-`dimensions`; a mismatch (embedder swapped) triggers re-embedding rather than
-serving a stale vector (`embeddingMatchesEmbedder`). Retrieval works
-identically well through the keyword/structured path with no embedder at all
-— nothing depends on semantic search being available.
+- `server/textEmbeddings/provider.mjs` — MiniLM (`Xenova/all-MiniLM-L6-v2`,
+  384-d), pinned by id AND revision like the other two encoders, loaded lazily,
+  queue-bounded. **Memory text never leaves the machine.**
+- `POST /api/embeddings` — authenticated, batched, bounded; stores nothing.
+- `src/memory/proxyEmbedder.js` — the browser side, satisfying the same
+  `{ name, model, dimensions, embed, embedMany }` interface the mock does.
+  `createServerEmbedderIfAvailable()` returns **null** when no encoder is
+  there, which is exactly what the coordinator already treats as "no embedder"
+  — so a machine without the model keeps the keyword fallback rather than
+  failing.
+- `createKeywordScorer()` is still the real fallback, not a vestige.
+
+### What it actually bought
+
+Measured by `npm run verify:embeddings` (20 checks) over seven questions a
+person would really ask, against seven stored memories, through the real
+retriever:
+
+| scorer | put the answering memory first |
+|---|---|
+| semantic | **5 / 7** |
+| keyword | 2 / 7 |
+
+It is not perfect and the failures are kept visible in that script's output.
+Both misses are ones where a distractor shares the subject — "what do I owe
+Matt" pulls "Matt is allergic to peanuts" — which is what the retriever's own
+entity bonus exists for.
+
+### Two things measurement changed
+
+**The relevance floor is per-scorer.** `MIN_SIGNAL` was 0.05, which suited
+token overlap, where unrelated text scores exactly 0.00. Cosine similarity
+never reaches 0: clearly unrelated pairs measure 0.06-0.08, *above* that bar,
+so reusing it would have made "a memory must show at least one real relevance
+signal" vacuous. Picking the replacement needed real queries rather than
+paraphrase pairs — the memory that answers a question scores 0.16-0.67 while
+topically adjacent distractors reach 0.44, so there is no clean separation and
+a floor cannot do the work of ranking. It is a noise gate at 0.12
+(`MIN_SIGNAL_BY_MATCH_TYPE`), and ranking does the rest. An earlier value of
+0.20, chosen from paraphrase pairs alone, would have silently suppressed a
+correct answer.
+
+**The encoder runs at fp32, not the q8 used elsewhere.** Under q8 the same text
+embeds differently depending on what else is in its batch (cosine 0.970 alone
+versus batched with a longer string). Vectors here are cached and compared
+across time, so that is silent noise between a stored memory and a query. fp32
+measures exactly 1.000000 and costs about a millisecond.
+
+`retriever.js`'s result still carries `matchType: 'semantic' | 'keyword' |
+'structured' | 'none'`, so which scorer ran is never guessed at — the dev
+Memory panel names the model and its width. Stored embeddings carry their
+`model` + `dimensions`; a mismatch triggers re-embedding rather than serving a
+stale vector (`embeddingMatchesEmbedder`), and a cold cache is filled in one
+batched call rather than one round trip per memory.
 
 ## Retrieval and ranking
 

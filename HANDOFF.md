@@ -8,7 +8,8 @@ design docs it links are accurate as of the same date.
 
 | Check | Result |
 |---|---|
-| Offline tests | **738/738 pass** (~3 s, `npm test`) |
+| Offline tests | **757/757 pass** (~3 s, `npm test`) |
+| Semantic memory | REAL — local MiniLM (384-d, fp32, pinned) server-side, `POST /api/embeddings`, browser proxy embedder, batched cache fill. Measured on real questions through the real retriever: **semantic 5/7 vs keyword 2/7** (`verify:embeddings`, 20 checks). Relevance floor is per-scorer (keyword 0.05, semantic 0.12) because cosine never reaches 0. Text never leaves the machine. |
 | Facial recognition | REAL and WIRED — InsightFace SCRFD+ArcFace server-side, enrollment from the People panel, `face_match`/`face_enrollment` evidence in the resolver, temporal voting. Measured: impostors max **0.216**; genuine cross-photograph **0.79**, cross-**recording** through the live camera **0.65**; identity held 17/17 readings under motion; a stale name after a hard cut decays in **5.0 s**, then never returns. `verify:face-live` runs the whole browser leg on real video through the virtual camera: **25/25**. **Consent enforcement OFF, templates unencrypted, no liveness — a photo or a recording matches.** |
 | Deterministic simulations | **11/11 pass** (see §10) |
 | Virtual-hardware lab | **13/13 scenarios pass** closed-loop through real Deepgram/Groq/gate/TTS/COCO-SSD on virtual `MediaStream` devices, + 17-check smoke (`verify:virtual-lab`; see [VIRTUAL-HARDWARE.md](VIRTUAL-HARDWARE.md)) |
@@ -263,8 +264,7 @@ write→queue→SQLite→recall loop (zero console errors).
 ## 12. Known mocks, placeholders, heuristics
 
 Scene interpreter (templates) · COCO-SSD 80 generic classes ·
-greedy-IoU tracking · keyword
-(not semantic) memory retrieval · lexical echo/dedup detection ·
+greedy-IoU tracking · lexical echo/dedup detection ·
 quiet-gap heuristic for `speak_when_convenient` · heuristic VAD/overlap
 in voice capture · exact-fingerprint replay check (not liveness) ·
 in-process rate limiting · dev-mode auth principal · the **mock worker is the
