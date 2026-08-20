@@ -22,7 +22,8 @@ import { createFaceIdentityService } from './faceIdentity/service.mjs';
 import { createFaceTemplateRepository } from './faceIdentity/templateRepository.mjs';
 import { createTemplateCipher } from './voiceIdentity/crypto.mjs';
 import { createFaceApiHandlers, attachFaceApi } from './routes/faceApi.mjs';
-import { createEmbeddingsApiHandlers, attachEmbeddingsApi } from './routes/embeddingsApi.mjs';
+import { createEmbeddingsApiHandlers, createMemoryEmbeddingHandlers, attachEmbeddingsApi } from './routes/embeddingsApi.mjs';
+import { createMemoryEmbeddingStore } from './repositories/memoryEmbeddingStore.mjs';
 import { getSharedTextEmbeddingProvider } from './textEmbeddings/provider.mjs';
 
 /**
@@ -125,9 +126,15 @@ export function createDataApi({ dbPath = process.env.ROMA_DB_PATH || undefined, 
   // waits on a model. Memory text is embedded here rather than anywhere else
   // precisely so it never leaves the machine.
   const textEmbeddings = getSharedTextEmbeddingProvider();
-  const embeddingsHandlers = createEmbeddingsApiHandlers({ provider: textEmbeddings, auth });
+  const embeddingStore = createMemoryEmbeddingStore({ db });
+  const embeddingsHandlers = createEmbeddingsApiHandlers({ provider: textEmbeddings, auth, embeddingStore });
+  // Vectors persist server-side (migration 0008) so a fresh browser profile
+  // seeds its cache instead of re-embedding the whole memory store.
+  const memoryEmbeddingHandlers = createMemoryEmbeddingHandlers({
+    provider: textEmbeddings, auth, embeddingStore, memoryRepository: repositories.memoryRepository,
+  });
 
-  return { db, auth, repositories, handlers, voiceIdentity, taskStore, engineeringMemory, dispatcher, agentTaskHandlers, faceIdentity, faceHandlers, textEmbeddings, embeddingsHandlers };
+  return { db, auth, repositories, handlers, voiceIdentity, taskStore, engineeringMemory, dispatcher, agentTaskHandlers, faceIdentity, faceHandlers, textEmbeddings, embeddingsHandlers, embeddingStore, memoryEmbeddingHandlers };
 }
 
 export function dataApiPlugin({ voiceIdentity = getSharedVoiceIdentityService() } = {}) {
@@ -137,7 +144,7 @@ export function dataApiPlugin({ voiceIdentity = getSharedVoiceIdentityService() 
     attachDataApi(server.middlewares, api.handlers);
     attachAgentTaskApi(server.middlewares, api.agentTaskHandlers);
     attachFaceApi(server.middlewares, api.faceHandlers);
-    attachEmbeddingsApi(server.middlewares, api.embeddingsHandlers);
+    attachEmbeddingsApi(server.middlewares, api.embeddingsHandlers, api.memoryEmbeddingHandlers);
   };
   return {
     name: 'roma-data-api',

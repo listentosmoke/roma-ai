@@ -52,6 +52,37 @@ export function createProxyEmbedder({ post, model, dimensions, batchSize = MAX_E
 }
 
 /**
+ * Fill the browser's vector cache from the server's persisted vectors, then
+ * ask the server to embed anything it has not embedded yet.
+ *
+ * Both halves are best-effort: retrieval works without either, just colder.
+ * The backfill is bounded per call, so a large store warms over a few passes
+ * rather than blocking startup on an unknown amount of work.
+ */
+export async function warmEmbeddingCache({ dataClient, repository, embedder, maxPasses = 4 }) {
+  if (!embedder || !repository?.seedEmbeddings) return { seeded: 0, embedded: 0 };
+  let seeded = 0;
+  let embedded = 0;
+  try {
+    const stored = await dataClient.get('/api/memory/embeddings');
+    seeded = repository.seedEmbeddings(stored?.embeddings ?? {}, { embedder });
+
+    for (let pass = 0; pass < maxPasses; pass += 1) {
+      const result = await dataClient.post('/api/memory/embeddings/backfill', { limit: 64 });
+      embedded += result?.embedded ?? 0;
+      if (!result?.embedded || !result?.remaining) break;
+    }
+    if (embedded) {
+      const refreshed = await dataClient.get('/api/memory/embeddings');
+      seeded += repository.seedEmbeddings(refreshed?.embeddings ?? {}, { embedder });
+    }
+  } catch {
+    // An unreachable or unconfigured server means a cold cache, not a failure.
+  }
+  return { seeded, embedded };
+}
+
+/**
  * Ask the server whether a real encoder is available, and build the embedder
  * only if one is. Returns null otherwise, which is exactly what the memory
  * coordinator already treats as "no embedder configured" — so a machine

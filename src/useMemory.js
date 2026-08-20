@@ -16,7 +16,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createMemoryCoordinator } from './memory/coordinator.js';
-import { createServerEmbedderIfAvailable } from './memory/proxyEmbedder.js';
+import { createServerEmbedderIfAvailable, warmEmbeddingCache } from './memory/proxyEmbedder.js';
 import { createLocalStorageRepository } from './memory/repository.js';
 import { createProxyProvider, createProvider } from './agent/provider.js';
 import { memoryConfig } from './memory/config.js';
@@ -72,10 +72,16 @@ export function useMemory() {
   useEffect(() => {
     let cancelled = false;
     createServerEmbedderIfAvailable({ dataClient })
-      .then((embedder) => {
+      .then(async (embedder) => {
         if (cancelled || !embedder) return;
         embedderRef.current = embedder;
         setEmbedderStatus(coordinator.embedderStatus());
+        // Hydration has to have finished, or there are no memories to attach
+        // vectors to yet.
+        await Promise.resolve(repository.ready?.());
+        if (cancelled) return;
+        const warmed = await warmEmbeddingCache({ dataClient, repository, embedder });
+        if (!cancelled) setEmbedderStatus({ ...coordinator.embedderStatus(), ...warmed, cached: repository.embeddingCacheSize?.() ?? 0 });
       })
       .catch(() => { /* keyword retrieval is the honest fallback, not an error */ });
     return () => { cancelled = true; };

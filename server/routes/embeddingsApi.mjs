@@ -46,7 +46,7 @@ function createRateLimiter({ windowMs = 10_000, max = 60 } = {}) {
   };
 }
 
-export function createEmbeddingsApiHandlers({ provider, auth, maxBatch = 64 }) {
+export function createEmbeddingsApiHandlers({ provider, auth, maxBatch = 64, embeddingStore = null }) {
   // Retrieval embeds a whole candidate pool on a cold cache, so the budget is
   // per request rather than per text.
   const limit = createRateLimiter({ windowMs: 10_000, max: 60 });
@@ -100,16 +100,91 @@ export function createEmbeddingsApiHandlers({ provider, auth, maxBatch = 64 }) {
   };
 }
 
+/** Vectors the browser can seed its cache from, so a fresh profile embeds nothing. */
+export function createMemoryEmbeddingHandlers({ provider, auth, embeddingStore, memoryRepository }) {
+  async function principalOf(req, res) {
+    const resolved = await auth.resolvePrincipal(req);
+    if (!resolved.ok) { sendJson(res, resolved.status ?? 401, { error: 'Unauthorized.', code: resolved.reasonCode }); return null; }
+    return resolved.principal;
+  }
+
+  return {
+    async read(req, res) {
+      const principal = await principalOf(req, res); if (!principal) return;
+      const model = provider.model;
+      const store = embeddingStore.forWorkspace(principal.workspaceId);
+      const memories = memoryRepository.forWorkspace(principal.workspaceId, principal.userId).exportAll();
+      const stored = store.read(memories.map((memory) => memory.memoryId), { model });
+      sendJson(res, 200, {
+        ok: true,
+        model,
+        // Only the shape the browser cache expects; no memory text goes back
+        // out through this route, because the browser already has it.
+        embeddings: Object.fromEntries(Object.entries(stored).map(([memoryId, entry]) => [memoryId, {
+          vector: entry.vector, model: entry.model, dimensions: entry.dimensions, computedAt: entry.computedAt,
+        }])),
+        counts: store.counts({ model }),
+      });
+    },
+
+    /**
+     * Embed a bounded slice of whatever has no vector yet. Bounded rather than
+     * exhaustive so this can be called repeatedly from a warm path instead of
+     * blocking startup on a store of unknown size.
+     */
+    async backfill(req, res) {
+      const principal = await principalOf(req, res); if (!principal) return;
+      const body = await readJsonBody(req).catch(() => ({}));
+      const store = embeddingStore.forWorkspace(principal.workspaceId);
+      const model = provider.model;
+      const pending = store.missing({ model, limit: Number(body.limit) || 64 });
+      if (!pending.length) {
+        sendJson(res, 200, { ok: true, embedded: 0, remaining: 0, model, counts: store.counts({ model }) });
+        return;
+      }
+      try {
+        const vectors = await provider.embedMany(pending.map((row) => row.summary));
+        const written = store.write(pending.map((row, index) => ({ memoryId: row.memoryId, vector: vectors[index] })), { model: provider.model });
+        // A model swap leaves rows nobody can compare against; drop them once
+        // the replacement has produced at least one vector of its own.
+        const purged = store.purgeOtherModels({ model: provider.model });
+        const counts = store.counts({ model: provider.model });
+        sendJson(res, 200, { ok: true, embedded: written, purged, remaining: Math.max(0, counts.total - counts.embedded), model: provider.model, counts });
+      } catch (error) {
+        sendJson(res, 503, { ok: false, error: 'The text encoder is unavailable.', code: 'model_unavailable', detail: error?.message ?? null });
+      }
+    },
+  };
+}
+
 const ROUTES = [
   ['GET', '/api/embeddings/status', 'status'],
   ['POST', '/api/embeddings/warmup', 'warmup'],
   ['POST', '/api/embeddings', 'embed'],
 ];
 
-export function attachEmbeddingsApi(middlewares, handlers) {
+const MEMORY_ROUTES = [
+  ['GET', '/api/memory/embeddings', 'read'],
+  ['POST', '/api/memory/embeddings/backfill', 'backfill'],
+];
+
+export function attachEmbeddingsApi(middlewares, handlers, memoryHandlers = null) {
   middlewares.use(async (req, res, next) => {
-    if (!req.url.startsWith('/api/embeddings')) { next(); return; }
+    const isEmbeddings = req.url.startsWith('/api/embeddings');
+    const isMemoryEmbeddings = req.url.startsWith('/api/memory/embeddings');
+    if (!isEmbeddings && !isMemoryEmbeddings) { next(); return; }
     const pathname = new URL(req.url, 'http://internal').pathname;
+    if (isMemoryEmbeddings) {
+      for (const [method, path, handler] of MEMORY_ROUTES) {
+        if (req.method !== method || pathname !== path) continue;
+        if (!memoryHandlers) { sendJson(res, 503, { error: 'Memory embeddings are not configured.', code: 'not_configured' }); return; }
+        try { await memoryHandlers[handler](req, res); }
+        catch (error) { sendJson(res, 500, { error: error?.message ?? 'Internal error.', code: 'server_error' }); }
+        return;
+      }
+      sendJson(res, 404, { error: 'No such memory-embeddings route.', code: 'not_found' });
+      return;
+    }
     for (const [method, path, handler] of ROUTES) {
       if (req.method !== method || pathname !== path) continue;
       try { await handlers[handler](req, res); }

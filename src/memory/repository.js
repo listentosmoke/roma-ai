@@ -203,6 +203,34 @@ function createRepositoryCore({ load, save, loadEmbeddings, saveEmbeddings, now 
       return readAll().map((m) => ({ ...m }));
     },
 
+    /**
+     * Seed the vector cache from vectors the SERVER already computed
+     * (migration 0008). Without this, every browser profile re-embeds the
+     * whole store before its first retrieval can rank anything — correct, but
+     * paid again on every new device and after every cache clear.
+     *
+     * Entries whose model does not match the current embedder are ignored
+     * rather than stored: a vector from another encoder is not a stale value,
+     * it is a value in a different space.
+     */
+    seedEmbeddings(entries = {}, { embedder = null } = {}) {
+      const cache = readEmbeddings();
+      let seeded = 0;
+      for (const [memoryId, entry] of Object.entries(entries)) {
+        if (embedder && !embeddingMatchesEmbedder(entry, embedder)) continue;
+        if (!Array.isArray(entry?.vector) || !entry.vector.length) continue;
+        cache[memoryId] = { vector: entry.vector, model: entry.model, dimensions: entry.dimensions, computedAt: entry.computedAt ?? now() };
+        seeded += 1;
+      }
+      if (seeded) writeEmbeddings(cache);
+      return seeded;
+    },
+
+    /** How many vectors are cached — diagnostics, and proof a seed took. */
+    embeddingCacheSize() {
+      return Object.keys(readEmbeddings()).length;
+    },
+
     /** Dev-only: wipe everything. Each provider scopes this to ITS OWN storage
      * (a distinct localStorage key / in-process Map) — never a shared/production DB. */
     clearAll() {

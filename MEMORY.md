@@ -317,6 +317,25 @@ versus batched with a longer string). Vectors here are cached and compared
 across time, so that is silent noise between a stored memory and a query. fp32
 measures exactly 1.000000 and costs about a millisecond.
 
+### Where vectors live
+
+Persisted server-side (migration 0008, `memory_embeddings`), not only in the
+browser. They were cached in localStorage keyed by memory id, which is correct
+but per-device: a second browser, a cleared cache, or a new machine re-embedded
+the entire store before its first retrieval could rank anything.
+
+- `GET /api/memory/embeddings` — the vectors for this workspace, for the model
+  currently loaded. The browser seeds its cache from these
+  (`repository.seedEmbeddings`) and then embeds only the query.
+- `POST /api/memory/embeddings/backfill` — embeds a bounded slice of whatever
+  has no vector yet, so a large store warms over a few passes instead of
+  blocking startup.
+- Vectors are stored as base64 Float32 (1.5 KB per 384-d vector against ~8 KB
+  as JSON, and exact rather than decimal-rounded) with the `model` that
+  produced them. Rows from another model are **ignored, never reinterpreted** —
+  and dropped once the new model has produced vectors of its own.
+- Deleting a memory deletes its vector (`ON DELETE CASCADE`).
+
 `retriever.js`'s result still carries `matchType: 'semantic' | 'keyword' |
 'structured' | 'none'`, so which scorer ran is never guessed at — the dev
 Memory panel names the model and its width. Stored embeddings carry their

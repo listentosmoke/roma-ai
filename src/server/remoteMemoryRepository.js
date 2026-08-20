@@ -46,6 +46,8 @@ export function createUnavailableMemoryRepository() {
     findRelated: () => [],
     searchStructured: () => [],
     searchSemantic: async () => [],
+    seedEmbeddings: () => 0,
+    embeddingCacheSize: () => 0,
     markAccessed: () => {},
     delete: () => false,
     deleteBySource: () => 0,
@@ -106,6 +108,8 @@ export function createServerBackedMemoryRepository({ dataClient, mutationQueue =
     findRelated: (filters) => local.findRelated(filters),
     searchStructured: (filters) => local.searchStructured(filters),
     searchSemantic: (args) => local.searchSemantic(args), // already async — client-side embedder scoring is unaffected
+    seedEmbeddings: (entries, options) => local.seedEmbeddings(entries, options),
+    embeddingCacheSize: () => local.embeddingCacheSize(),
     markAccessed(ids) {
       local.markAccessed(ids);
       if (ids?.length) sendMutation({ kind: 'access', method: 'post', path: '/api/data/memory/access', body: { ids } });
