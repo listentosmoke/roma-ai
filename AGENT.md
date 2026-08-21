@@ -54,6 +54,37 @@ The Inspector still just writes; the runtime still just reads at think-time and
 attaches a snapshot **ephemerally**. What's new: the runtime now also reasons
 about *whether* to attach an answer at all, and can act.
 
+## Time sense and thinking one step ahead
+
+Roma used to have timestamps on transcript turns and no idea what **day** it
+was — which is why she could not be prudent about anything. "Before Friday"
+means nothing without knowing today is Thursday, and a plan that needs a shop
+open is worthless at 11pm.
+
+Two blocks now sit in every compiled context:
+
+- **`RIGHT NOW`** — the real weekday, date, time and part of day, in the terms
+  a person uses (`describeNow` in `src/clock.js`). The model reasons about
+  "this afternoon", not epoch milliseconds.
+- **`COMING UP`** — commitments, tasks and goals with a `validUntil` that is
+  near or already passed (`memory.upcoming()`). This is deliberately **not**
+  retrieval: a deadline matters because of the date, not because somebody
+  happened to mention it. Overdue items come first, since they are the most
+  actionable. Absent entirely when nothing is due.
+
+Three prompt rules govern their use, and all three are about restraint:
+work out what "tomorrow" actually is rather than repeating the word; raise a
+deadline only when it genuinely bears on what is being discussed, and never
+recite the list; and **think one step ahead** — if what the wearer is about to
+do has an obvious near-term consequence they have not accounted for, fold it
+into the answer in a clause or two.
+
+That last one is common sense, not a consequence engine. There is no model of
+outcomes, no risk scoring, no enumeration of what might go wrong. The rule
+explicitly says not to speculate about remote possibilities and to say nothing
+when unsure — because an assistant that lists risks is worse than one that
+stays quiet.
+
 ## Files
 
 | File | Role |

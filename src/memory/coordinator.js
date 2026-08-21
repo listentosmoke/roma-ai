@@ -11,6 +11,10 @@
 
 import { writeInteraction as writerWriteInteraction, proposeCandidates, applyCandidate } from './writer.js';
 import { ingestDocument as ingest } from './ingest.js';
+import { describeWhen } from '../clock.js';
+
+/** Memory types that can carry a deadline worth being reminded of. */
+const TIME_BOUND_TYPES = new Set(['commitment', 'task', 'goal']);
 import { retrieve as retrieverRetrieve } from './retriever.js';
 
 const MIN_UNIQUE_MARGIN = 0.15;
@@ -75,6 +79,33 @@ export function createMemoryCoordinator({ repository, provider, now = Date.now, 
         errors: result.errors,
       });
       return result;
+    },
+
+    /**
+     * What is coming up, regardless of what is being talked about.
+     *
+     * Retrieval answers "what is relevant to this turn"; this answers "what is
+     * about to matter". A deadline does not become important because someone
+     * mentioned it — it becomes important because it is Thursday. Overdue
+     * items come first, then the nearest.
+     */
+    upcoming({ withinMs = 7 * 86_400_000, limit = 5, at = now() } = {}) {
+      return repository
+        .searchStructured({ status: 'active' })
+        .filter((memory) => TIME_BOUND_TYPES.has(memory.type) && Number.isFinite(memory.validUntil))
+        .map((memory) => ({ memory, when: describeWhen(memory.validUntil, at) }))
+        .filter(({ when }) => when.overdue || when.deltaMs <= withinMs)
+        .sort((a, b) => a.memory.validUntil - b.memory.validUntil)
+        .slice(0, limit)
+        .map(({ memory, when }) => ({
+          memoryId: memory.memoryId,
+          type: memory.type,
+          summary: memory.summary,
+          dueAt: memory.validUntil,
+          when: when.text,
+          overdue: when.overdue,
+          importance: memory.importance,
+        }));
     },
 
     async writeInteraction(interactionPackage, { signal } = {}) {

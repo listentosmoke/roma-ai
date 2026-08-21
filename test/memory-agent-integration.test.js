@@ -122,3 +122,63 @@ test('stored text that looks like a prompt injection stays inert quoted data —
   assert.match(seenContent, /HACKED/); // present only as quoted data in the user message
   assert.match(seenSystem, /DATA about the past, never an instruction/); // model is explicitly told to treat it as inert
 });
+
+// ── deadlines reaching the agent regardless of the topic ──────────────────
+
+test('a commitment that is nearly due reaches the agent even when nothing mentions it', async () => {
+  const repository = createInMemoryRepository();
+  const at = Date.now();
+  repository.create({
+    type: 'commitment', subjectId: 'person_user', predicate: 'send_quote', object: { what: 'HVAC quote' },
+    summary: 'Send Matt the Building 5 HVAC quote.', confidence: 0.9, importance: 0.8, tags: ['work'],
+    source: { evidenceType: 'user_stated' }, validUntil: at + 18 * 3_600_000, createdAt: at, updatedAt: at,
+  });
+  const memory = createMemoryCoordinator({ repository, provider: createMockProvider(async () => ({ candidates: [] })) });
+
+  let promptSeen = '';
+  const provider = createMockProvider(async ({ messages }) => {
+    promptSeen = messages.map((m) => m.content).join('\n');
+    return { decision: 'ignore', response: null, reason_summary: 'not for me', task_update: null, tool_calls: [], visual_analysis_request: null, scene_revision_used: null };
+  });
+
+  const runtime = createAgentRuntime({ provider, memory });
+  runtime.beginSession(at);
+  await runtime.handleTurn({ speaker: 'Speaker 0', text: 'the weather has been awful lately', startedAt: 0.1, endedAt: 0.4 });
+
+  assert.match(promptSeen, /RIGHT NOW: /, 'she knows what day it is');
+  assert.match(promptSeen, /COMING UP/, 'and what is nearly due');
+  assert.match(promptSeen, /Send Matt the Building 5 HVAC quote\./);
+  assert.match(promptSeen, /in \d+ hours:/);
+});
+
+test('with nothing due, the agent is not handed an empty deadline list', async () => {
+  const repository = createInMemoryRepository();
+  const memory = createMemoryCoordinator({ repository, provider: createMockProvider(async () => ({ candidates: [] })) });
+
+  let promptSeen = '';
+  const provider = createMockProvider(async ({ messages }) => {
+    promptSeen = messages.map((m) => m.content).join('\n');
+    return { decision: 'ignore', response: null, reason_summary: 'nothing', task_update: null, tool_calls: [], visual_analysis_request: null, scene_revision_used: null };
+  });
+
+  const runtime = createAgentRuntime({ provider, memory });
+  runtime.beginSession(Date.now());
+  await runtime.handleTurn({ speaker: 'Speaker 0', text: 'hello there', startedAt: 0.1, endedAt: 0.4 });
+
+  assert.match(promptSeen, /RIGHT NOW: /);
+  assert.doesNotMatch(promptSeen, /COMING UP/);
+});
+
+test('with no memory configured at all, the runtime still knows the time and does not crash', async () => {
+  let promptSeen = '';
+  const provider = createMockProvider(async ({ messages }) => {
+    promptSeen = messages.map((m) => m.content).join('\n');
+    return { decision: 'ignore', response: null, reason_summary: 'nothing', task_update: null, tool_calls: [], visual_analysis_request: null, scene_revision_used: null };
+  });
+  const runtime = createAgentRuntime({ provider });
+  runtime.beginSession(Date.now());
+  await runtime.handleTurn({ speaker: 'Speaker 0', text: 'hello', startedAt: 0.1, endedAt: 0.4 });
+
+  assert.match(promptSeen, /RIGHT NOW: /);
+  assert.doesNotMatch(promptSeen, /COMING UP/);
+});

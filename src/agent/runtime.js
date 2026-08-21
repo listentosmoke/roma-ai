@@ -321,6 +321,10 @@ export function createAgentRuntime({
       // model call, no inference — so it costs nothing to have ready the
       // moment a face resolves.
       personBriefs: briefsForPresentPeople({ sceneInfo, currentSpeaker }),
+      // What is about to matter, whatever is being talked about. Retrieval
+      // answers "relevant to this turn"; this answers "it is Thursday and
+      // this is due Friday".
+      upcoming: memory?.upcoming ? memory.upcoming({ at: at ?? now() }) : [],
       // Who is wearing the glasses (src/agent/wearer.js) — resolved in code
       // from identity evidence or close-mic dominance, never guessed by the
       // model. Everything the model concludes about "who was spoken to"

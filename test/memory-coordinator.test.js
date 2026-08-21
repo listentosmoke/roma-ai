@@ -157,3 +157,59 @@ test('embedderStatus reports honestly when no embedding provider is configured',
   const status = coordinator.embedderStatus();
   assert.equal(status.configured, false);
 });
+
+// ── what is about to matter, regardless of the conversation ───────────────
+
+test('upcoming surfaces deadlines by date, not by relevance to the current turn', () => {
+  const repository = createInMemoryRepository();
+  const coordinator = createMemoryCoordinator({ repository, provider: createMockProvider(async () => ({ candidates: [] })) });
+  const at = Date.parse('2026-08-20T09:00:00');
+  const due = (offsetMs, summary, type = 'commitment') => repository.create({
+    type, subjectId: 'person_user', predicate: 'p', object: {}, summary,
+    confidence: 0.9, importance: 0.6, tags: [], source: { evidenceType: 'user_stated' },
+    validUntil: at + offsetMs, createdAt: at, updatedAt: at,
+  }).memory;
+
+  due(-2 * 86_400_000, 'Call the surveyor.');
+  due(18 * 3_600_000, 'Send Matt the HVAC quote.');
+  due(30 * 86_400_000, 'Renew the insurance.');
+  repository.create({
+    type: 'fact', subjectId: 'person_user', predicate: 'p', object: {}, summary: 'A fact with no deadline.',
+    confidence: 0.9, importance: 0.9, tags: [], source: { evidenceType: 'user_stated' }, createdAt: at, updatedAt: at,
+  });
+
+  const upcoming = coordinator.upcoming({ at });
+
+  assert.deepEqual(upcoming.map((item) => item.summary), ['Call the surveyor.', 'Send Matt the HVAC quote.']);
+  assert.equal(upcoming[0].overdue, true, 'overdue comes first — it is the most actionable');
+  assert.equal(upcoming[0].when, '2 days overdue');
+  assert.equal(upcoming[1].when, 'in 18 hours');
+});
+
+test('a deadline far out is not "coming up" yet', () => {
+  const repository = createInMemoryRepository();
+  const coordinator = createMemoryCoordinator({ repository, provider: createMockProvider(async () => ({ candidates: [] })) });
+  const at = Date.parse('2026-08-20T09:00:00');
+  repository.create({
+    type: 'commitment', subjectId: 'person_user', predicate: 'p', object: {}, summary: 'Renew the insurance.',
+    confidence: 0.9, importance: 0.6, tags: [], source: { evidenceType: 'user_stated' },
+    validUntil: at + 30 * 86_400_000, createdAt: at, updatedAt: at,
+  });
+  assert.deepEqual(coordinator.upcoming({ at }), []);
+  assert.equal(coordinator.upcoming({ at, withinMs: 60 * 86_400_000 }).length, 1, 'until you ask further out');
+});
+
+test('a forgotten commitment stops coming up', () => {
+  const repository = createInMemoryRepository();
+  const coordinator = createMemoryCoordinator({ repository, provider: createMockProvider(async () => ({ candidates: [] })) });
+  const at = Date.parse('2026-08-20T09:00:00');
+  const memory = repository.create({
+    type: 'commitment', subjectId: 'person_user', predicate: 'p', object: {}, summary: 'Call the surveyor.',
+    confidence: 0.9, importance: 0.6, tags: [], source: { evidenceType: 'user_stated' },
+    validUntil: at + 3_600_000, createdAt: at, updatedAt: at,
+  }).memory;
+
+  assert.equal(coordinator.upcoming({ at }).length, 1);
+  repository.delete(memory.memoryId);
+  assert.deepEqual(coordinator.upcoming({ at }), []);
+});
