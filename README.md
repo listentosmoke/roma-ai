@@ -38,6 +38,13 @@ in-process Node server that holds every API key and a SQLite database.
   echo suppression, live voice catalog.
 - **Episodic memory** — evidence-ranked structured records with corrections,
   supersession chains, and ranked retrieval, stored server-side in SQLite.
+  Semantic retrieval runs on a local MiniLM encoder with vectors persisted
+  server-side, so a new browser seeds its cache instead of re-embedding.
+- **Document ingestion** — paste an exported chat, notes, or any text and it
+  becomes memories through the *same* writer a spoken turn uses: same schema,
+  same evidence ranking, same duplicate rule. Who said what in the export
+  decides what each line is worth, and an assistant's own lines can never
+  become durable facts about anyone (see [MEMORY.md](MEMORY.md)).
   Retrieval is **semantic**: a local MiniLM encoder runs server-side (text
   never leaves the machine), so "when is that write-up due" finds "the Q3
   report is due Friday" with no shared words. Measured 5/7 against keyword
@@ -48,7 +55,10 @@ in-process Node server that holds every API key and a SQLite database.
 - **Facial recognition** — local InsightFace (SCRFD + ArcFace, 512-d) running
   server-side through onnxruntime; templates never leave the machine and are
   stored unencrypted at rest, relying on full-disk encryption (migration 0006
-  records that trade). Per-frame identity is smoothed by temporal voting, and
+  records that trade). The frames an enrollment was built from are kept beside
+  them as redundancy, so replacing the encoder is a re-embed rather than asking
+  everyone to enrol again; **recognition** frames are still dropped the moment
+  they are embedded (`ROMA_FACE_IMAGES=0` keeps nothing at all). Per-frame identity is smoothed by temporal voting, and
   a match becomes `face_match` **presence** evidence in the identity resolver:
   because the camera is worn and looks outward, a face can corroborate or
   contradict a voice match but never decides who is speaking on its own. A

@@ -28,3 +28,6 @@ transcriptfromyoutube.txt
 # Face fixtures are photographs of real people, fetched on demand
 # (npm run fetch:face-fixtures), never committed.
 test/fixtures/faces/
+
+# Enrollment face images (redundancy for the templates) — never committed.
+data/faces/

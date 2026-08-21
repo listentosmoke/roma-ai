@@ -14,7 +14,7 @@
 //   - production, server unreachable  -> fails CLOSED (createUnavailable...)
 //     rather than silently writing durable/sensitive data to localStorage.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createMemoryCoordinator } from './memory/coordinator.js';
 import { createServerEmbedderIfAvailable, warmEmbeddingCache } from './memory/proxyEmbedder.js';
 import { createLocalStorageRepository } from './memory/repository.js';
@@ -121,6 +121,17 @@ export function useMemory() {
 
   function refreshCounts() { setCounts(coordinator.counts()); }
 
+  /**
+   * Feed Roma something you already have. Returns the outcome so the panel can
+   * say what actually happened rather than "done".
+   */
+  const ingestDocument = useCallback(async (args) => {
+    const result = await coordinator.ingestDocument(args);
+    refreshCounts();
+    return result;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     refreshCounts(); // may already hold data from a previous session (server or localStorage fallback)
     // Hydration from the server finishes AFTER this effect runs, and nothing
@@ -143,6 +154,7 @@ export function useMemory() {
 
   return {
     coordinator, // pass as `memory` to useAgent, and register memory tools with it
+    ingestDocument,
     repository, // exposed so usePeople.js can relink identity <-> memory records through the SAME store (see identity/coordinator.js's mergePeople/relinkMemoriesForInteraction)
     mutationQueue,
     queueStatus,

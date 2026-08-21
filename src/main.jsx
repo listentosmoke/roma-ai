@@ -423,6 +423,77 @@ const MEMORY_ACTION_LABEL = {
 // state, and delete/clear-all controls. Collapsible so it never crowds the
 // primary interaction UI. No raw prompts, no hidden reasoning — only the
 // structured outcomes the coordinator already emits.
+/**
+ * Paste something Roma should know — an exported chat, meeting notes, anything.
+ * It goes through the same writer a spoken turn does, so what comes back is
+ * reported honestly: what was stored, what merged into what she already knew,
+ * and what was refused.
+ */
+const PASTE_PLACEHOLDER = ['Alex: can you send the HVAC quote?', 'Matt: yes, by Friday.'].join(String.fromCharCode(10));
+
+function IngestBox({ memory }) {
+  const [text, setText] = useState('');
+  const [title, setTitle] = useState('');
+  const [userSpeaker, setUserSpeaker] = useState('');
+  const [busy, setBusy] = useState(null);
+  const [outcome, setOutcome] = useState(null);
+  const [error, setError] = useState('');
+
+  const run = async () => {
+    setError(''); setOutcome(null); setBusy({ chunk: 0, chunks: 0 });
+    try {
+      const result = await memory.ingestDocument({
+        text,
+        title: title.trim() || null,
+        userSpeaker: userSpeaker.trim() || null,
+        onProgress: setBusy,
+      });
+      setOutcome(result);
+      if (result.stored || result.merged) setText('');
+    } catch (caught) {
+      setError(caught.message || 'Ingestion failed.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="ingest-box">
+      <p className="suggestion-meta muted">
+        Paste an exported chat, notes, or anything Roma should know. Lines like <code>Name: text</code> and
+        WhatsApp exports are read as conversation; anything else is read as prose. Naming yourself below is
+        what lets your own lines count as your own words — everyone else&apos;s stay attributed to them.
+      </p>
+      <div className="suggestion-actions">
+        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="what is this? (optional)" />
+        <input value={userSpeaker} onChange={(e) => setUserSpeaker(e.target.value)} placeholder="your name in the export (optional)" />
+      </div>
+      <textarea
+        className="ingest-textarea"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder={PASTE_PLACEHOLDER}
+        rows={6}
+      />
+      <div className="suggestion-actions">
+        <button type="button" disabled={!text.trim() || busy} onClick={run}>
+          {busy ? `Reading… ${busy.chunk}/${busy.chunks || '?'}` : 'Add to memory'}
+        </button>
+        {text.trim() && !busy && <span className="muted">{text.length.toLocaleString()} characters</span>}
+      </div>
+      {outcome && (
+        <p className="suggestion-meta muted">
+          {outcome.chunks} section{outcome.chunks === 1 ? '' : 's'} read ·{' '}
+          <strong>{outcome.stored}</strong> stored · {outcome.merged} merged into what she already knew ·{' '}
+          {outcome.discarded} not durable
+          {outcome.errors.length > 0 && ` · ${outcome.errors.length} problem(s)`}
+        </p>
+      )}
+      {error && <div className="error"><AlertTriangle size={16} /> {error}</div>}
+    </div>
+  );
+}
+
 function MemoryPanel({ memory }) {
   const active = useMemo(() => memory.list({}).slice(-20).reverse(), [memory.counts]);
   const recentEvents = memory.events.slice(-12).reverse();
@@ -437,6 +508,7 @@ function MemoryPanel({ memory }) {
           {Object.entries(memory.counts.byType).map(([type, count]) => `${type}: ${count}`).join(' · ')}
         </p>
       )}
+      <IngestBox memory={memory} />
       {active.length > 0 && (
         <ul className="diagnostic-trace">
           {active.map((m) => (

@@ -317,3 +317,26 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
   .console-meta { order: 3; flex-basis: 100%; }
   .interim { white-space: normal; }
 }
+
+/* Document ingestion — paste something Roma should know. */
+.ingest-box {
+  margin: 0.6rem 0 0.9rem;
+  padding: 0.7rem;
+  border: 1px solid var(--border, #2a2f3a);
+  border-radius: 8px;
+  background: var(--panel-2, rgba(255, 255, 255, 0.02));
+}
+.ingest-textarea {
+  width: 100%;
+  margin: 0.45rem 0;
+  padding: 0.5rem 0.6rem;
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: inherit;
+  background: var(--panel, rgba(0, 0, 0, 0.2));
+  border: 1px solid var(--border, #2a2f3a);
+  border-radius: 6px;
+  resize: vertical;
+}
+.ingest-textarea:focus { outline: 2px solid var(--accent, #5b8def); outline-offset: -1px; }

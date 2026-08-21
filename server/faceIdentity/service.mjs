@@ -34,6 +34,9 @@ export function createFaceIdentityService({
   db,
   provider = createFaceProvider(),
   repository = null,
+  // Enrollment frames are kept as redundancy for the template (see
+  // server/faceIdentity/imageStore.mjs). Recognition frames never are.
+  imageStore = null,
   requireConsent = process.env.FACE_IDENTITY_REQUIRE_CONSENT === '1',
   matchThreshold = DEFAULT_MATCH_THRESHOLD,
   margin = DEFAULT_MARGIN,
@@ -49,6 +52,7 @@ export function createFaceIdentityService({
       matchThreshold,
       margin,
       note: requireConsent ? 'consent enforced' : 'CONSENT NOT ENFORCED — development configuration',
+      keepsEnrollmentImages: Boolean(imageStore),
     };
   }
 
@@ -82,6 +86,9 @@ export function createFaceIdentityService({
 
       const embeddings = [];
       const rejected = [];
+      // Only the frames that actually contributed are worth keeping: a frame
+      // with no face in it is not a picture of this person.
+      const usedImages = [];
       let bestQuality = 0;
       for (const image of images) {
         const faces = await provider.detect(image);
@@ -90,6 +97,7 @@ export function createFaceIdentityService({
         const quality = faceQuality(faces[0]);
         if (!quality.ok) { rejected.push(quality.reasonCode); continue; }
         embeddings.push(await provider.embed(image, faces[0]));
+        usedImages.push(image);
         bestQuality = Math.max(bestQuality, faces[0].score);
       }
       if (!embeddings.length) return { ok: false, reasonCode: rejected[0] ?? 'no_usable_face', rejected };
@@ -107,7 +115,17 @@ export function createFaceIdentityService({
         sampleCount: embeddings.length,
         consentId: consent.consentId,
       });
-      return result.ok ? { ...result, samplesUsed: embeddings.length, rejected } : result;
+      if (!result.ok) return result;
+
+      // Keep the frames this template came from, so a model change or a
+      // corrupt row means a re-embed rather than asking the person to sit in
+      // front of a camera again. Failing to store them is not a failed
+      // enrollment — the template is what identifies; these are the backup.
+      const saved = imageStore
+        ? imageStore.save({ workspaceId, faceProfileId: result.profile.faceProfileId, images: usedImages })
+        : { ok: false, stored: 0, reasonCode: 'image_store_disabled' };
+
+      return { ...result, samplesUsed: embeddings.length, rejected, imagesStored: saved.stored, imageReasonCode: saved.ok ? null : saved.reasonCode };
     },
 
     /**

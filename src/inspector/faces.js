@@ -22,8 +22,9 @@
 //                                   encoder and the encrypted templates.
 //
 // The browser never sees a face template and never runs the model: it sends a
-// JPEG of the current frame and receives person ids back. Frames are not
-// stored anywhere, by either side.
+// JPEG of the current frame and receives person ids back. Recognition frames
+// are not stored anywhere, by either side — only ENROLLMENT frames are kept,
+// server-side, as redundancy for the template (faceIdentity/imageStore.mjs).
 //
 // A match is EVIDENCE, never authentication, and there is no liveness check —
 // a printed photograph may match. See PLAN-FACE-IDENTITY.md.

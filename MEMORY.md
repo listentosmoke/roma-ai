@@ -317,6 +317,35 @@ versus batched with a longer string). Vectors here are cached and compared
 across time, so that is silent noise between a stored memory and a query. fp32
 measures exactly 1.000000 and costs about a millisecond.
 
+### Ingesting what you already have
+
+`POST` nothing special: pasted text goes through `memory/ingest.js` into the
+**same** `proposeCandidates -> applyCandidate` path a spoken turn uses. That is
+the design, not an implementation detail — ingestion gets no privileged route
+into the store, so schema validation, evidence ranking, the duplicate rule, and
+the ban on Roma's own words becoming durable facts all apply unchanged.
+
+- **Chunking** is bounded and overlapping, cutting on paragraph then line
+  boundaries so a fact is not sliced in half.
+- **Parsing** recognises WhatsApp exports and `Name: text` transcripts; prose
+  with no speakers stays prose rather than being forced into a shape.
+- **Evidence follows who spoke.** Your lines are `user_stated`, other people's
+  are `other_speaker_stated`, an assistant's are `roma_generated`. A candidate
+  drawn from a chunk where several people spoke takes the **weakest** human
+  level in it — claiming your authority for a colleague's line would be a lie
+  the rest of the system then trusts. Assistant lines are excluded from that
+  minimum rather than setting it, or nothing in an exported AI chat could ever
+  be stored.
+- **Injection.** An imported document is untrusted text shown to a model. It
+  arrives as transcript content — the channel the writer already treats as
+  quoted data — the model's only output channel is the candidate schema, and
+  every candidate is re-checked by deterministic code afterwards.
+- **Re-importing is safe by construction**, not by a special case: identical
+  facts hit the duplicate rule and merge.
+
+Known limit: attribution is per-chunk, not per-sentence, because the extractor
+returns facts rather than citations. That is why a mixed chunk is conservative.
+
 ### Why deduplication is NOT semantic
 
 The obvious next use for an encoder is "have I already stored this?" — and it

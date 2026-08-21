@@ -93,7 +93,7 @@ function relevanceFromContext({ query, subjectId, entityIds = [] }) {
   return 0.3;
 }
 
-export function createDataApiHandlers({ db, repositories, auth, voiceIdentity = null, now = Date.now }) {
+export function createDataApiHandlers({ db, repositories, auth, voiceIdentity = null, faceImageStore = null, now = Date.now }) {
   const { memoryRepository, identityRepository, auditRepository, consentRepository, sessionRepository } = repositories;
   const limiter = createRateLimiter({ windowMs: 10_000, max: 120 });
   const mutationLimiter = createRateLimiter({ windowMs: 10_000, max: 40 });
@@ -386,9 +386,19 @@ export function createDataApiHandlers({ db, repositories, auth, voiceIdentity = 
     async peopleDelete(req, res, params) {
       const principal = await withPrincipal(req, res); if (!principal) return;
       const repo = identityRepository.forWorkspace(principal.workspaceId, principal.userId);
+      // Read the face profiles BEFORE the delete retires them, then remove
+      // their enrollment images. Forgetting a person has to include their
+      // pictures, or the word means nothing.
+      const faceProfileIds = repo.getPerson(params.id)?.faceProfileIds ?? [];
       const result = repo.deletePerson(params.id);
-      audit(principal, { action: 'person.delete', resourceType: 'person', resourceId: params.id, outcome: result.ok ? 'deleted' : 'not_found' });
-      sendJson(res, result.ok ? 200 : 404, result);
+      let imagesRemoved = 0;
+      if (result.ok && faceImageStore) {
+        for (const faceProfileId of faceProfileIds) {
+          imagesRemoved += faceImageStore.remove({ workspaceId: principal.workspaceId, faceProfileId }).removed;
+        }
+      }
+      audit(principal, { action: 'person.delete', resourceType: 'person', resourceId: params.id, outcome: result.ok ? 'deleted' : 'not_found', reasonCode: `face_images_${imagesRemoved}` });
+      sendJson(res, result.ok ? 200 : 404, { ...result, faceImagesRemoved: imagesRemoved });
     },
 
     // ── real bounded voice identity ─────────────────────────────────────

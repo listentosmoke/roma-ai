@@ -20,6 +20,7 @@ import { createQwenCodeWorker } from './agentEnv/workers/qwenCode.mjs';
 import { createAgentTaskHandlers, attachAgentTaskApi } from './routes/agentTasks.mjs';
 import { createFaceIdentityService } from './faceIdentity/service.mjs';
 import { createFaceTemplateRepository } from './faceIdentity/templateRepository.mjs';
+import { createFaceImageStore } from './faceIdentity/imageStore.mjs';
 import { createTemplateCipher } from './voiceIdentity/crypto.mjs';
 import { createFaceApiHandlers, attachFaceApi } from './routes/faceApi.mjs';
 import { createEmbeddingsApiHandlers, createMemoryEmbeddingHandlers, attachEmbeddingsApi } from './routes/embeddingsApi.mjs';
@@ -80,7 +81,12 @@ export function createDataApi({ dbPath = process.env.ROMA_DB_PATH || undefined, 
     sessionRepository: createSqliteSessionRepository({ db }),
   };
   voiceIdentity.configure({ database: db, dataRepositories: repositories });
-  const handlers = createDataApiHandlers({ db, repositories, auth, voiceIdentity });
+  // Enrollment frames are kept beside the database as redundancy for the
+  // templates; recognition frames still are not (faceIdentity/imageStore.mjs
+  // explains the boundary). ROMA_FACE_IMAGES=0 turns the redundancy off.
+  // Built here because deleting a PERSON must delete their pictures too.
+  const faceImageStore = loadWorkerConfigEnv().ROMA_FACE_IMAGES === '0' ? null : createFaceImageStore();
+  const handlers = createDataApiHandlers({ db, repositories, auth, voiceIdentity, faceImageStore });
 
   // ── server agent environment (background task dispatch) ──────────────────
   // The worker engine is replaceable by configuration, and defaults to the
@@ -115,11 +121,12 @@ export function createDataApi({ dbPath = process.env.ROMA_DB_PATH || undefined, 
     db,
     repository: createFaceTemplateRepository({ db, cipher: faceCipher }),
     consentRepository: repositories.consentRepository,
+    imageStore: faceImageStore,
   });
   const faceDescribed = faceIdentity.describe();
   if (!faceDescribed.configured) log.warn('[face-identity] BIOMETRIC_ENCRYPTION_KEY not set — face identity fails closed.');
   else if (!faceDescribed.requireConsent) log.warn('[face-identity] enabled with CONSENT ENFORCEMENT OFF — templates can be enrolled without a consent record. Set FACE_IDENTITY_REQUIRE_CONSENT=1 to restore it.');
-  const faceHandlers = createFaceApiHandlers({ faceIdentity, auth, identityRepository: repositories.identityRepository, auditRepository: repositories.auditRepository });
+  const faceHandlers = createFaceApiHandlers({ faceIdentity, auth, identityRepository: repositories.identityRepository, auditRepository: repositories.auditRepository, imageStore: faceImageStore });
 
   // ── text embeddings ──────────────────────────────────────────────────────
   // Loaded lazily on first use, like the other two encoders, so startup never

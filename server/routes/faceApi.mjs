@@ -3,9 +3,17 @@
 // from the body, everything is workspace-scoped, bodies are bounded, and
 // errors are generic.
 //
-// Images arrive as base64 JPEG/PNG from the browser's own camera, are used to
-// produce an embedding, and are then dropped — no frame is written to disk and
-// no image is ever stored. Only the encrypted 512-d template persists.
+// Images arrive as base64 JPEG/PNG from the browser's own camera and are used
+// to produce an embedding. What happens next depends on WHY they arrived:
+//
+//   ENROLLMENT frames are kept, as redundancy for the template they produced —
+//   a template is a projection through one specific encoder, so without the
+//   originals a model change means asking the person to sit in front of a
+//   camera again. See server/faceIdentity/imageStore.mjs.
+//
+//   IDENTIFICATION frames are dropped the moment they are embedded, exactly as
+//   before. Those are continuous and nobody consented to them individually;
+//   keeping them would make this a recording of everything the camera sees.
 //
 // CONSENT IS NOT ENFORCED in this build (see server/faceIdentity/service.mjs).
 
@@ -55,7 +63,7 @@ function createRateLimiter({ windowMs = 10_000, max = 30 } = {}) {
   };
 }
 
-export function createFaceApiHandlers({ faceIdentity, auth, identityRepository = null, auditRepository = null }) {
+export function createFaceApiHandlers({ faceIdentity, auth, identityRepository = null, auditRepository = null, imageStore = null }) {
   // Identification runs per camera cycle, so it gets a looser budget than
   // enrollment, which is a deliberate human action.
   const identifyLimit = createRateLimiter({ windowMs: 10_000, max: 40 });
@@ -145,8 +153,32 @@ export function createFaceApiHandlers({ faceIdentity, auth, identityRepository =
     async deleteProfile(req, res, params) {
       const principal = await principalOf(req, res); if (!principal) return;
       const result = faceIdentity.templates.forWorkspace(principal.workspaceId).delete(params.id);
-      audit(principal, { action: 'face.delete', resourceType: 'face_profile', resourceId: params.id, outcome: result.ok ? 'deleted' : 'not_found' });
-      sendJson(res, result.ok ? 200 : 404, result);
+      // "Forget this face" has to mean the pictures too, or it is a lie.
+      const images = imageStore?.remove({ workspaceId: principal.workspaceId, faceProfileId: params.id }) ?? { removed: 0 };
+      audit(principal, { action: 'face.delete', resourceType: 'face_profile', resourceId: params.id, outcome: result.ok ? 'deleted' : 'not_found', reasonCode: `images_${images.removed}` });
+      sendJson(res, result.ok ? 200 : 404, { ...result, imagesRemoved: images.removed });
+    },
+
+    /** The enrollment frames for one profile — the People panel shows the user their own enrollments. */
+    async listImages(req, res, params) {
+      const principal = await principalOf(req, res); if (!principal) return;
+      if (!imageStore) { sendJson(res, 200, { images: [], enabled: false }); return; }
+      const profile = faceIdentity.templates.forWorkspace(principal.workspaceId).get(params.id);
+      if (!profile) { sendJson(res, 404, { error: 'No such face profile.', code: 'not_found' }); return; }
+      sendJson(res, 200, { enabled: true, images: imageStore.list({ workspaceId: principal.workspaceId, faceProfileId: params.id }) });
+    },
+
+    async readImage(req, res, params) {
+      const principal = await principalOf(req, res); if (!principal) return;
+      if (!imageStore) { sendJson(res, 404, { error: 'Enrollment images are not kept.', code: 'not_configured' }); return; }
+      const profile = faceIdentity.templates.forWorkspace(principal.workspaceId).get(params.id);
+      if (!profile) { sendJson(res, 404, { error: 'No such face profile.', code: 'not_found' }); return; }
+      const bytes = imageStore.read({ workspaceId: principal.workspaceId, faceProfileId: params.id, name: params.name });
+      if (!bytes) { sendJson(res, 404, { error: 'No such image.', code: 'not_found' }); return; }
+      res.statusCode = 200;
+      res.setHeader('Content-Type', String(params.name).endsWith('.png') ? 'image/png' : 'image/jpeg');
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.end(bytes);
     },
   };
 }
@@ -158,6 +190,8 @@ const ROUTES = [
   ['POST', '/api/face/identify', 'identify'],
   ['GET', '/api/face/profiles', 'listProfiles'],
   ['DELETE', '/api/face/profiles/:id', 'deleteProfile'],
+  ['GET', '/api/face/profiles/:id/images', 'listImages'],
+  ['GET', '/api/face/profiles/:id/images/:name', 'readImage'],
 ];
 
 function matchPath(pattern, pathname) {

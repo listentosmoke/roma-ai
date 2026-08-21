@@ -10,6 +10,7 @@
 // reasoning, only structured outcomes and reason codes.
 
 import { writeInteraction as writerWriteInteraction, proposeCandidates, applyCandidate } from './writer.js';
+import { ingestDocument as ingest } from './ingest.js';
 import { retrieve as retrieverRetrieve } from './retriever.js';
 
 const MIN_UNIQUE_MARGIN = 0.15;
@@ -56,6 +57,26 @@ export function createMemoryCoordinator({ repository, provider, now = Date.now, 
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
 
     /** Automatic write boundary — called once per completed agent-involved interaction. */
+    /**
+     * Ingest a document you already have — an exported chat, notes, anything
+     * pasted. Goes through the same writer as a spoken turn (see
+     * memory/ingest.js), so it can store nothing a conversation could not.
+     */
+    async ingestDocument({ text, title = null, userSpeaker = null, assistantSpeakers, onProgress = null } = {}, { signal } = {}) {
+      const result = await ingest({ text, title, userSpeaker, assistantSpeakers, repository, provider, now, onProgress, signal });
+      emit({
+        type: 'memory-ingested',
+        documentId: result.documentId,
+        title: result.title,
+        chunks: result.chunks,
+        stored: result.stored,
+        merged: result.merged,
+        discarded: result.discarded,
+        errors: result.errors,
+      });
+      return result;
+    },
+
     async writeInteraction(interactionPackage, { signal } = {}) {
       const result = await writerWriteInteraction({ interactionPackage, repository, provider, now, signal });
       if (result.skipped) { emit({ type: 'memory-write-skipped', reason: result.reason, interactionId: interactionPackage.interactionId }); return result; }
