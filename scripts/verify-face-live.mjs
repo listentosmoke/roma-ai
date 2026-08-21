@@ -186,7 +186,10 @@ try {
       const found = await lab.cdp.evaluate(`(() => {
         const details = [...document.querySelectorAll('details')].find((d) => d.querySelector('summary')?.textContent.includes('voice identity'));
         if (!details) return false;
-        details.open = true;
+        // The panels now sit inside a collapsed "Under the hood" drawer, and
+        // innerText of a hidden element is empty — so open every ancestor,
+        // not just the panel itself.
+        for (let node = details; node; node = node.parentElement) if (node.tagName === 'DETAILS') node.open = true;
         return details.innerText.includes('Fixture Person');
       })()`);
       if (found) return true;
@@ -199,7 +202,7 @@ try {
   const clicked = await lab.cdp.evaluate(`(() => {
     const details = [...document.querySelectorAll('details')].find((d) => d.querySelector('summary')?.textContent.includes('voice identity'));
     if (!details) return 'panel not found';
-    details.open = true;
+    for (let node = details; node; node = node.parentElement) if (node.tagName === 'DETAILS') node.open = true;
     const button = [...details.querySelectorAll('button')].find((b) => b.textContent.includes('Enroll Face'));
     if (!button) return 'button not found';
     if (button.disabled) return 'button disabled';

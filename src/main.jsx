@@ -1101,6 +1101,115 @@ function DevHarnessPanel({ onInject, lastSpokenText, log }) {
   );
 }
 
+
+/**
+ * The ambient view — what Roma can see and hear right now, and anything that
+ * actually needs you.
+ *
+ * This is the surface Roma is meant to be used through. Everything else on the
+ * page is instrumentation: useful for understanding why she did something,
+ * useless for living with her. So this stays short by design — if there is
+ * nothing to report, it says so in one line rather than filling space.
+ */
+function NowPanel({ inspector, people, voice, voiceDelivery, agentTasks, proactive }) {
+  const present = inspector.scene?.people ?? [];
+  const named = present.filter((person) => person.identity || person.personId);
+  const strangers = present.length - named.length;
+
+  const waiting = (agentTasks.tasks ?? []).filter((task) => task.pendingRequest);
+  const suggestions = (proactive.suggestions ?? []).filter((suggestion) => suggestion.status === 'pending');
+  const needsYou = waiting.length + suggestions.length;
+
+  const [briefFor, setBriefFor] = useState(null);
+  const brief = useMemo(
+    () => (briefFor ? people.briefFor(briefFor) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [briefFor, people.counts],
+  );
+
+  return (
+    <section className="now">
+      <div className="now-row">
+        <span className="now-label">Here</span>
+        <div className="now-body">
+          {present.length === 0 ? (
+            <span className="muted">{inspector.watching ? 'Nobody in view.' : 'Camera off.'}</span>
+          ) : (
+            <span className="now-people">
+              {named.map((person) => (
+                <button
+                  key={person.id}
+                  type="button"
+                  className={`person-tag ${briefFor === person.personId ? 'open' : ''}`}
+                  disabled={!person.personId}
+                  onClick={() => setBriefFor((current) => (current === person.personId ? null : person.personId))}
+                  title={person.personId ? 'What Roma knows about them' : 'Recognised, but not named here'}
+                >
+                  {person.identity ?? 'someone she recognises'}
+                </button>
+              ))}
+              {strangers > 0 && <span className="muted">{strangers} unrecognised</span>}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {brief && (
+        <div className="now-row">
+          <span className="now-label" />
+          <div className="now-body"><PersonBrief brief={brief} /></div>
+        </div>
+      )}
+
+      <div className="now-row">
+        <span className="now-label">Hearing</span>
+        <div className="now-body">
+          {voice.listening
+            ? <span>{voice.interim || <span className="muted">Listening — nothing being said right now.</span>}</span>
+            : <span className="muted">Not listening. Press Start.</span>}
+        </div>
+      </div>
+
+      {voiceDelivery.lastSpoken?.text && (
+        <div className="now-row">
+          <span className="now-label">Roma said</span>
+          <div className="now-body">{voiceDelivery.lastSpoken.text}</div>
+        </div>
+      )}
+
+      <div className="now-row">
+        <span className="now-label">Needs you</span>
+        <div className="now-body">
+          {needsYou === 0 ? (
+            <span className="muted">Nothing.</span>
+          ) : (
+            <ul className="now-list">
+              {waiting.map((task) => (
+                <li key={task.taskId}>
+                  <span className="chip trace-agent">task</span> {task.pendingRequest}
+                  <span className="now-actions">
+                    <button type="button" onClick={() => agentTasks.respond({ taskId: task.taskId, approved: true })}>Approve</button>
+                    <button type="button" className="link-btn" onClick={() => agentTasks.respond({ taskId: task.taskId, approved: false })}>No</button>
+                  </span>
+                </li>
+              ))}
+              {suggestions.map((suggestion) => (
+                <li key={suggestion.id}>
+                  <span className="chip">suggestion</span> {suggestion.text ?? suggestion.summary}
+                  <span className="now-actions">
+                    <button type="button" onClick={() => proactive.accept(suggestion.id)}>Do it</button>
+                    <button type="button" className="link-btn" onClick={() => proactive.dismiss(suggestion.id)}>Dismiss</button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function App() {
   const voice = useVoice();
   // People come before the Inspector: the face recognizer the Inspector runs
@@ -1427,8 +1536,8 @@ function App() {
         <div className="brand">
           <span className="logo"><Mic size={18} /></span>
           <div>
-            <strong>Roma AI</strong>
-            <small>Real-time transcription &amp; diarization · Deepgram</small>
+            <strong>Roma</strong>
+            <small>{voice.listening ? 'Listening' : 'Idle'}{inspector.watching ? ' · watching' : ''}</small>
           </div>
         </div>
         <span className={`status-pill ${voice.listening ? 'live' : ''}`}>
@@ -1480,15 +1589,14 @@ function App() {
       {voice.error && <div className="error"><AlertTriangle size={16} /> {voice.error}</div>}
       {inspector.inspectorError && <div className="error"><AlertTriangle size={16} /> {inspector.inspectorError}</div>}
 
-      <ScenePanel inspector={inspector} />
-      <AgentPanel agent={agent} lastSegment={agent.lastTurn ? voice.segments[agent.lastTurn.turnId - 1] : null} />
-      <ProactivePanel proactive={proactive} />
-      <VoicePanel voiceDelivery={voiceDelivery} proactive={proactive} health={agent.health} />
-      {import.meta.env.DEV && <DiagnosticsPanel agentEvents={agent.events} deliveryEvents={voiceDelivery.events} />}
-      {import.meta.env.DEV && <MemoryPanel memory={memory} />}
-      {import.meta.env.DEV && <VoicePeoplePanel people={people} voiceIdentity={voiceIdentity} voice={voice} faceIdentity={faceIdentity} inspector={inspector} />}
-      {import.meta.env.DEV && <ServerDataPanel memory={memory} people={people} serverData={serverData} preflight={preflight} />}
-      {import.meta.env.DEV && <DevHarnessPanel onInject={injectHarnessSegment} lastSpokenText={voiceDelivery.lastSpoken?.text} log={harnessLog} />}
+      <NowPanel
+        inspector={inspector}
+        people={people}
+        voice={voice}
+        voiceDelivery={voiceDelivery}
+        agentTasks={agentTasks}
+        proactive={proactive}
+      />
 
       <section className="transcript">
         <div className="transcript-head">
@@ -1523,6 +1631,23 @@ function App() {
           </ol>
         )}
       </section>
+
+      {/* Instrumentation. Every panel that was on the main surface lives here
+          now — they explain why Roma did something, which is a different job
+          from living with her. Kept mounted so nothing that reads the DOM
+          (the virtual lab drives these controls) has to know they moved. */}
+      <details className="dev-drawer">
+        <summary>Under the hood</summary>
+        <ScenePanel inspector={inspector} />
+        <AgentPanel agent={agent} lastSegment={agent.lastTurn ? voice.segments[agent.lastTurn.turnId - 1] : null} />
+        <ProactivePanel proactive={proactive} />
+        <VoicePanel voiceDelivery={voiceDelivery} proactive={proactive} health={agent.health} />
+        {import.meta.env.DEV && <DiagnosticsPanel agentEvents={agent.events} deliveryEvents={voiceDelivery.events} />}
+        {import.meta.env.DEV && <MemoryPanel memory={memory} />}
+        {import.meta.env.DEV && <VoicePeoplePanel people={people} voiceIdentity={voiceIdentity} voice={voice} faceIdentity={faceIdentity} inspector={inspector} />}
+        {import.meta.env.DEV && <ServerDataPanel memory={memory} people={people} serverData={serverData} preflight={preflight} />}
+        {import.meta.env.DEV && <DevHarnessPanel onInject={injectHarnessSegment} lastSpokenText={voiceDelivery.lastSpoken?.text} log={harnessLog} />}
+      </details>
     </main>
   );
 }

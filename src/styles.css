@@ -357,3 +357,61 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
   color: var(--muted, #9aa0aa);
 }
 .person-brief .diagnostic-trace { margin: 0 0 0.35rem; }
+
+/* ── The ambient view: what Roma can see and hear right now ────────────── */
+.now {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin: 0.9rem 0;
+  padding: 0.85rem 1rem;
+  background: var(--panel, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--border, #2a2f3a);
+  border-radius: 10px;
+}
+.now-row {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  gap: 0 0.9rem;
+  align-items: baseline;
+  padding: 0.32rem 0;
+}
+.now-label {
+  font-size: 0.68rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted, #9aa0aa);
+  padding-top: 0.15rem;
+}
+.now-body { min-width: 0; font-size: 0.94rem; line-height: 1.5; }
+.now-people { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+
+.person-tag {
+  font: inherit;
+  font-size: 0.86rem;
+  padding: 0.14rem 0.55rem;
+  color: inherit;
+  background: var(--panel-2, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border, #2a2f3a);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.person-tag:hover:not(:disabled),
+.person-tag.open { border-color: var(--accent, #5b8def); }
+.person-tag:disabled { cursor: default; opacity: 0.75; }
+
+.now-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.45rem; }
+.now-list li { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.now-actions { display: flex; gap: 0.4rem; margin-left: auto; }
+
+/* Instrumentation, out of the way but one click deep. */
+.dev-drawer { margin-top: 1.6rem; border-top: 1px solid var(--border, #2a2f3a); padding-top: 0.7rem; }
+.dev-drawer > summary {
+  cursor: pointer;
+  font-size: 0.72rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted, #9aa0aa);
+  padding: 0.3rem 0;
+}
+.dev-drawer > summary:hover { color: inherit; }
