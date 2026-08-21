@@ -41,6 +41,38 @@ be said. A task update is just another `sourceType: 'task_update'` alongside
 direct answers and proactive coaching — same gate, same denial-to-visual
 fallback.
 
+## Connecting tools (MCP)
+
+The worker can reach MCP servers, declared in Roma's config as
+`AGENT_WORKER_MCP` — a JSON object of server name to config:
+
+```
+AGENT_WORKER_MCP={"github":{"command":"npx","args":["-y","@modelcontextprotocol/server-github"],"env":{"GITHUB_PERSONAL_ACCESS_TOKEN":"…"}}}
+```
+
+Both shapes Qwen Code accepts work: a spawned `command` + `args`, or a `url` /
+`httpUrl`. `includeTools` / `excludeTools` narrow a server further.
+
+Why it lives here and not in your own `~/.qwen`: the worker runs against a
+**private** `QWEN_HOME` precisely so it cannot inherit whatever you happen to
+have connected. Connecting a tool to Roma is a deliberate act, recorded in one
+place, and visible in `describe()` — by name only, since an MCP config can
+carry tokens.
+
+Two properties that are enforced rather than intended:
+
+- **Every server is untrusted** (`trust: false`). An MCP tool call goes through
+  the same approval path as any other write, so connecting a tool never widens
+  what runs unattended.
+- **The tool-surface guard still applies.** MCP tool names cannot be known
+  ahead of time, so they are allowed by *shape* — `server__tool`, and only
+  under a server that was actually configured. An unconfigured server's tools
+  are refused exactly like `computer_use` is, which is what caught a wrong
+  assumption once already.
+
+A malformed entry is dropped with a reason (`describe().mcpErrors`) rather than
+crashing the worker: one broken connector must not stop every background task.
+
 ## Engineering memory is not personal memory
 
 `eng_memory` is a separate table with its own retrieval path

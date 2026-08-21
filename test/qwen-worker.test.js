@@ -25,6 +25,10 @@ import {
   WRITE_TOOLS,
   DENIED_TOOLS,
   RESULT_SCHEMA,
+  parseMcpServers,
+  buildSystemSettings,
+  mcpToolPrefixes,
+  SYSTEM_SETTINGS_OVERLAY,
 } from '../server/agentEnv/workers/qwenProtocol.mjs';
 
 // ── child environment ────────────────────────────────────────────────────────
@@ -343,4 +347,67 @@ test('a worker that died with nothing to say still fails loudly', () => {
 
 test('a cancelled run reports nothing — the wearer already knows', () => {
   assert.equal(buildTerminalEvent({ summary: summaryOf(), exitCode: null, cancelled: true }), null);
+});
+
+// ── MCP connectors (tools Roma can reach through the worker) ───────────────
+
+test('MCP servers are read from Roma\'s own config, not the user\'s', () => {
+  const { servers, errors } = parseMcpServers(JSON.stringify({
+    github: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-github'], env: { GITHUB_TOKEN: 'x' } },
+    notes: { httpUrl: 'http://127.0.0.1:9000/mcp' },
+  }));
+  assert.deepEqual(Object.keys(servers), ['github', 'notes']);
+  assert.deepEqual(servers.github.args, ['-y', '@modelcontextprotocol/server-github']);
+  assert.equal(servers.notes.httpUrl, 'http://127.0.0.1:9000/mcp');
+  assert.deepEqual(errors, []);
+});
+
+test('every connector is untrusted, so its tools still go through approval', () => {
+  const { servers } = parseMcpServers(JSON.stringify({ github: { command: 'npx' } }));
+  assert.equal(servers.github.trust, false, 'connecting a tool must not widen what runs unattended');
+});
+
+test('a broken connector is dropped with a reason, never crashing the worker', () => {
+  assert.deepEqual(parseMcpServers('{not json').servers, {});
+  assert.match(parseMcpServers('{not json').errors[0], /not valid JSON/);
+
+  const mixed = parseMcpServers(JSON.stringify({
+    good: { command: 'npx' },
+    'bad name!': { command: 'npx' },
+    empty: {},
+    notAnObject: 'nope',
+  }));
+  assert.deepEqual(Object.keys(mixed.servers), ['good'], 'the working one still loads');
+  assert.equal(mixed.errors.length, 3);
+});
+
+test('no MCP configured means no MCP section at all', () => {
+  assert.deepEqual(parseMcpServers(undefined), { servers: {}, errors: [] });
+  assert.deepEqual(buildSystemSettings({ mcpServers: {} }), SYSTEM_SETTINGS_OVERLAY);
+  assert.equal(buildSystemSettings({ mcpServers: {} }).mcpServers, undefined);
+});
+
+test('configured MCP servers reach the settings the worker actually runs with', () => {
+  const { servers } = parseMcpServers(JSON.stringify({ github: { command: 'npx' } }));
+  const settings = buildSystemSettings({ mcpServers: servers });
+  assert.equal(settings.tools.computerUse.enabled, false, 'the standing lockdown survives');
+  assert.deepEqual(Object.keys(settings.mcpServers), ['github']);
+});
+
+test('a configured connector\'s tools are allowed; an unconfigured one\'s are not', () => {
+  // MCP tool names cannot be known ahead of time, so they are allowed by
+  // shape — but only under a server that was actually configured.
+  const prefixes = mcpToolPrefixes(parseMcpServers(JSON.stringify({ github: { command: 'npx' } })).servers);
+  assert.deepEqual(prefixes, ['github__']);
+
+  const refused = verifyToolSurface(
+    ['read_file', 'github__create_issue', 'stripe__charge_card', 'computer_use'],
+    READONLY_TOOLS,
+    { mcpPrefixes: prefixes },
+  );
+  assert.deepEqual(refused, ['stripe__charge_card', 'computer_use']);
+});
+
+test('with no MCP configured, an MCP-looking tool is still refused', () => {
+  assert.deepEqual(verifyToolSurface(['github__create_issue'], READONLY_TOOLS), ['github__create_issue']);
 });

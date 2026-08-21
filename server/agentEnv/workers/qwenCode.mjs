@@ -31,6 +31,9 @@ import {
   READONLY_TOOLS,
   WRITE_TOOLS,
   SYSTEM_SETTINGS_OVERLAY,
+  buildSystemSettings,
+  parseMcpServers,
+  mcpToolPrefixes,
   OUTPUT_DIRECTIVE,
 } from './qwenProtocol.mjs';
 
@@ -73,6 +76,10 @@ export function createQwenCodeWorker({
   const resolved = resolve({ env });
   const qwenHome = path.join(stateDir, 'qwen-home');
   let systemSettingsPath = null;
+  // Tools Roma may reach through this worker, declared as AGENT_WORKER_MCP.
+  // A malformed entry is dropped with a reason rather than taking the worker
+  // down — one broken connector must not stop every background task.
+  const { servers: mcpServers, errors: mcpErrors } = parseMcpServers(env.AGENT_WORKER_MCP);
 
   /**
    * Write the settings overlay and create the worker's private config home.
@@ -82,13 +89,18 @@ export function createQwenCodeWorker({
     if (systemSettingsPath) return systemSettingsPath;
     await fs.mkdir(qwenHome, { recursive: true });
     const file = path.join(stateDir, 'qwen-system-settings.json');
-    await fs.writeFile(file, JSON.stringify(SYSTEM_SETTINGS_OVERLAY, null, 2), 'utf8');
+    // MCP servers come from Roma's own config, never from the user's ~/.qwen —
+    // the worker runs against a private QWEN_HOME exactly so connecting a tool
+    // to Roma stays a deliberate act recorded in one place.
+    await fs.writeFile(file, JSON.stringify(buildSystemSettings({ mcpServers }), null, 2), 'utf8');
     systemSettingsPath = file;
     return file;
   }
 
   return {
     name: 'qwen',
+    /** Which connectors this worker was configured with, and anything that was refused. */
+    mcp: () => ({ servers: Object.keys(mcpServers), errors: mcpErrors }),
     describe: () => ({
       engine: 'qwen-code',
       real: true,
@@ -98,6 +110,10 @@ export function createQwenCodeWorker({
       // State, never the value — this is reported through an API and logged.
       credential: env.AGENT_WORKER_API_KEY?.trim() ? 'configured' : 'missing',
       model: env.AGENT_WORKER_MODEL?.trim() || 'qwen3-coder-plus',
+      // Names only — an MCP config can carry tokens, and this is reported
+      // through an API and logged.
+      mcpServers: Object.keys(mcpServers),
+      mcpErrors,
       note: resolved.ok
         ? 'Qwen Code CLI, headless, private config home, tool surface restricted and verified per run'
         : resolved.reason,
@@ -134,7 +150,7 @@ export function createQwenCodeWorker({
             if (!surfaceViolation) {
               const advertised = parser.summary().advertisedTools;
               if (advertised) {
-                const extra = verifyToolSurface(advertised, mode === 'write' ? WRITE_TOOLS : READONLY_TOOLS);
+                const extra = verifyToolSurface(advertised, mode === 'write' ? WRITE_TOOLS : READONLY_TOOLS, { mcpPrefixes: mcpToolPrefixes(mcpServers) });
                 if (extra.length) {
                   surfaceViolation = extra;
                   killTree(child);

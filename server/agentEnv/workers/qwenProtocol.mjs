@@ -175,10 +175,84 @@ export const SYSTEM_SETTINGS_OVERLAY = {
   tools: { computerUse: { enabled: false } },
 };
 
-/** Tools the CLI advertised that we never granted. Empty means the run is safe to start. */
-export function verifyToolSurface(advertised = [], allowed = []) {
+/**
+ * MCP servers the worker may reach, declared in Roma's own config rather than
+ * inherited from the user's ~/.qwen. That distinction is the point: the worker
+ * runs against a private QWEN_HOME precisely so it cannot pick up whatever the
+ * user happens to have connected. Connecting a tool to Roma is a deliberate
+ * act, recorded in one place.
+ *
+ * Declared as `AGENT_WORKER_MCP` in .env, as JSON:
+ *
+ *   AGENT_WORKER_MCP={"github":{"command":"npx","args":["-y","@modelcontextprotocol/server-github"],"env":{"GITHUB_TOKEN":"…"}}}
+ *
+ * Malformed JSON yields no servers rather than a crashed dispatch — a broken
+ * connector must not take the whole worker down.
+ */
+export function parseMcpServers(raw) {
+  if (!raw || typeof raw !== 'string') return { servers: {}, errors: [] };
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch (error) { return { servers: {}, errors: [`AGENT_WORKER_MCP is not valid JSON: ${error.message}`] }; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { servers: {}, errors: ['AGENT_WORKER_MCP must be a JSON object of server name -> config'] };
+
+  const servers = {};
+  const errors = [];
+  for (const [name, config] of Object.entries(parsed)) {
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) { errors.push(`ignored MCP server "${name}": names must be alphanumeric`); continue; }
+    if (!config || typeof config !== 'object') { errors.push(`ignored MCP server "${name}": config must be an object`); continue; }
+    // Either a spawned command or a URL — the two shapes Qwen Code accepts.
+    const hasCommand = typeof config.command === 'string' && config.command.trim();
+    const hasUrl = typeof config.url === 'string' || typeof config.httpUrl === 'string';
+    if (!hasCommand && !hasUrl) { errors.push(`ignored MCP server "${name}": needs a command or a url`); continue; }
+    servers[name] = {
+      ...(hasCommand ? { command: config.command, args: Array.isArray(config.args) ? config.args.map(String) : [] } : {}),
+      ...(typeof config.url === 'string' ? { url: config.url } : {}),
+      ...(typeof config.httpUrl === 'string' ? { httpUrl: config.httpUrl } : {}),
+      ...(config.env && typeof config.env === 'object' ? { env: Object.fromEntries(Object.entries(config.env).map(([k, v]) => [k, String(v)])) } : {}),
+      ...(Number.isFinite(config.timeout) ? { timeout: config.timeout } : {}),
+      // Roma decides what a connector may do, not the connector.
+      ...(Array.isArray(config.includeTools) ? { includeTools: config.includeTools.map(String) } : {}),
+      ...(Array.isArray(config.excludeTools) ? { excludeTools: config.excludeTools.map(String) } : {}),
+      trust: false,
+    };
+  }
+  return { servers, errors };
+}
+
+/**
+ * The system settings the worker actually runs with: the standing overlay plus
+ * whatever MCP servers are configured. `trust: false` on every server is
+ * deliberate — an MCP tool call goes through the same approval path as any
+ * other write, so connecting a tool never silently widens what runs unattended.
+ */
+export function buildSystemSettings({ mcpServers = {} } = {}) {
+  const names = Object.keys(mcpServers);
+  if (!names.length) return { ...SYSTEM_SETTINGS_OVERLAY };
+  return { ...SYSTEM_SETTINGS_OVERLAY, mcpServers };
+}
+
+/**
+ * MCP tools arrive with names Roma cannot know in advance, so the tool-surface
+ * guard has to allow them by SHAPE. Qwen namespaces them as `server__tool`,
+ * so only names prefixed by a server that was actually configured are allowed
+ * — an unconfigured server's tools are still refused.
+ */
+export function mcpToolPrefixes(mcpServers = {}) {
+  return Object.keys(mcpServers).map((name) => `${name}__`);
+}
+
+/**
+ * Tools the CLI advertised that we never granted. Empty means the run is safe
+ * to start.
+ *
+ * `mcpPrefixes` covers tools whose names cannot be known ahead of time: an MCP
+ * server's tools are namespaced `server__tool`, so a configured server's tools
+ * pass and an unconfigured one's do not. Everything else must be named
+ * exactly, which is what caught the wrong `replace`/`edit` guess.
+ */
+export function verifyToolSurface(advertised = [], allowed = [], { mcpPrefixes = [] } = {}) {
   const permitted = new Set([...allowed, 'structured_output']);
-  return advertised.filter((tool) => !permitted.has(tool));
+  return advertised.filter((tool) => !permitted.has(tool) && !mcpPrefixes.some((prefix) => tool.startsWith(prefix)));
 }
 
 /**
