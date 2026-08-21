@@ -115,6 +115,8 @@ export function usePeople({ memoryRepository = null, memoryCoordinator = null } 
     list: (filters) => coordinator.list(filters),
     listRelationships: (filters) => coordinator.listRelationships(filters),
     showIdentityEvidence: (personId) => coordinator.showIdentityEvidence(personId),
+    // What Roma knows about someone — the same read the agent gets.
+    briefFor: (personId) => coordinator.briefFor(personId),
     showPersonProfile: (personId) => coordinator.showPersonProfile(personId),
     confirmMatch: (args) => { const r = coordinator.confirmMatch(args); refreshCounts(); return r; },
     rejectMatch: (args) => { const r = coordinator.rejectMatch(args); refreshCounts(); return r; },

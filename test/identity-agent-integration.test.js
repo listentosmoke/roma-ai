@@ -179,3 +179,51 @@ test('an unidentified person in frame produces no face evidence at all', async (
 
   assert.deepEqual(repository.exportAll().evidence, [], 'perceiving a stranger must not create a record about them');
 });
+
+// ── the brief reaching the agent (the Donna behaviour) ─────────────────────
+
+test('when a known face is present, what Roma knows about them is in her context', async () => {
+  const { identity, repository } = makeIdentity({ memoryRepository: null });
+  const matt = repository.createPerson({ displayName: 'Matt', identityStatus: 'confirmed', roles: ['contractor'] }).person;
+  const store = createSceneStore();
+  store.update({
+    objects: [],
+    people: [{ id: 'track_1', identity: 'Matt', personId: matt.personId, faceProfileId: 'face_1', confidence: 0.86, quality: 0.9, lastSeenAt: 1000 }],
+    sceneLabel: 'room',
+    summary: 'One person is present.',
+  }, 1000);
+
+  let promptSeen = '';
+  const provider = createMockProvider(async ({ messages }) => {
+    promptSeen = messages.map((m) => m.content).join('\n');
+    return respondDecision('Sure.');
+  });
+  const runtime = createAgentRuntime({ provider, identity, sceneStore: store });
+  runtime.beginSession(1000);
+  await runtime.handleTurn({ speaker: 'Speaker 0', text: 'Anything I should know?', startedAt: 0.1, endedAt: 0.4 });
+
+  assert.match(promptSeen, /PEOPLE PRESENT/, 'the brief section is there');
+  assert.match(promptSeen, /PERSON: Matt \(contractor\)/, 'and it names who she can see');
+});
+
+test('with nobody recognised, no brief section appears at all', async () => {
+  const { identity } = makeIdentity({ memoryRepository: null });
+  const store = createSceneStore();
+  store.update({
+    objects: [],
+    people: [{ id: 'track_1', identity: null, personId: null, confidence: 0, quality: 0, lastSeenAt: 1000 }],
+    sceneLabel: 'room',
+    summary: 'Someone is present.',
+  }, 1000);
+
+  let promptSeen = '';
+  const provider = createMockProvider(async ({ messages }) => {
+    promptSeen = messages.map((m) => m.content).join('\n');
+    return respondDecision('Sure.');
+  });
+  const runtime = createAgentRuntime({ provider, identity, sceneStore: store });
+  runtime.beginSession(1000);
+  await runtime.handleTurn({ speaker: 'Speaker 0', text: 'Anything I should know?', startedAt: 0.1, endedAt: 0.4 });
+
+  assert.doesNotMatch(promptSeen, /PEOPLE PRESENT/, 'an unidentified stranger is not somebody she knows');
+});

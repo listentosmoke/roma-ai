@@ -14,6 +14,7 @@
 
 import { generateRelationshipId } from './repository.js';
 import { RESOLUTION_THRESHOLDS } from './resolver.js';
+import { buildPersonBrief, buildBriefsForPresent } from './brief.js';
 
 const MAX_RELATIONSHIPS_FOR_CONTEXT = 5;
 const MAX_RELINK_MEMORIES = 10;
@@ -290,6 +291,19 @@ export function createIdentityCoordinator({ repository, resolver, voiceProvider 
     return result;
   }
 
+  /**
+   * What is known about one person — the read the agent and the People panel
+   * both use (src/identity/brief.js). Straight database reads, no model call.
+   */
+  function briefFor(personId, { at = now() } = {}) {
+    return buildPersonBrief(personId, { identityRepository: repository, memoryRepository, now: at });
+  }
+
+  /** Briefs for everyone currently visible or speaking. Bounded — a crowd is not a prompt. */
+  function briefsForPresent(personIds, { at = now(), limit = 3 } = {}) {
+    return buildBriefsForPresent({ personIds, identityRepository: repository, memoryRepository, now: at, limit });
+  }
+
   /** "Show why you resolved that" — provenance for a person, no raw prompts. */
   function showIdentityEvidence(personId) {
     const person = repository.getPerson(personId);
@@ -385,6 +399,8 @@ export function createIdentityCoordinator({ repository, resolver, voiceProvider 
     addRelationship,
     correctRelationship,
     removeRelationship,
+    briefFor,
+    briefsForPresent,
     showIdentityEvidence,
     showPersonProfile,
     relationshipsFor,

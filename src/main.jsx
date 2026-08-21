@@ -623,6 +623,7 @@ function PersonRow({ person, people, onShowEvidence, evidenceOpen, evidence }) {
         </button>
       </div>
 
+
       {evidenceOpen && evidence && (
         <ul className="diagnostic-trace">
           {evidence.evidence.map((e) => (
@@ -724,6 +725,46 @@ function PeoplePanel({ people }) {
   );
 }
 
+/**
+ * What Roma knows about one person, as she would use it — open items first,
+ * because that is what you want reminding of when someone walks in.
+ */
+function PersonBrief({ brief }) {
+  if (!brief) return null;
+  return (
+    <div className="person-brief">
+      {brief.thin ? (
+        <p className="suggestion-meta muted">Nothing recorded about them yet beyond the name.</p>
+      ) : (
+        <>
+          {brief.open.length > 0 && (
+            <>
+              <p className="brief-heading">Still open with them</p>
+              <ul className="diagnostic-trace">
+                {brief.open.map((item) => <li key={item.memoryId}><span className="chip trace-agent">{item.type}</span> {item.summary}</li>)}
+              </ul>
+            </>
+          )}
+          {brief.knownFor.length > 0 && (
+            <>
+              <p className="brief-heading">What you know about them</p>
+              <ul className="diagnostic-trace">
+                {brief.knownFor.map((item) => <li key={item.memoryId}><span className="chip">{item.type}</span> {item.summary}</li>)}
+              </ul>
+            </>
+          )}
+        </>
+      )}
+      <p className="suggestion-meta muted">
+        {brief.counts.memories} memor{brief.counts.memories === 1 ? 'y' : 'ies'} · {brief.counts.relationships} relationship
+        {brief.counts.relationships === 1 ? '' : 's'}
+        {brief.lastSeen ? ` · last seen ${brief.lastSeen}` : ''}
+        {brief.lastMentioned ? ` · last came up ${brief.lastMentioned}` : ''}
+      </p>
+    </div>
+  );
+}
+
 function VoicePersonRow({ person, people, voiceIdentity, voice, faceIdentity, cameraOn, grabFrame, onShowEvidence, evidenceOpen, evidence }) {
   const [renameText, setRenameText] = useState('');
   const [aliasText, setAliasText] = useState('');
@@ -735,6 +776,8 @@ function VoicePersonRow({ person, people, voiceIdentity, voice, faceIdentity, ca
   const faceBusy = Boolean(faceIdentity.busyPersonId);
   const faceBusyHere = faceIdentity.busyPersonId === person.personId;
   const faceReady = faceIdentity.ready;
+  const [briefOpen, setBriefOpen] = useState(false);
+  const brief = useMemo(() => (briefOpen ? people.briefFor(person.personId) : null), [briefOpen, person.personId, people.counts]);
   const needsConfirmation = person.identityStatus === 'provisional' || person.identityStatus === 'candidate';
 
   useEffect(() => {
@@ -757,6 +800,7 @@ function VoicePersonRow({ person, people, voiceIdentity, voice, faceIdentity, ca
         {needsConfirmation && <button type="button" onClick={() => people.confirmMatch({ personId: person.personId })}>Confirm identity</button>}
         {needsConfirmation && <button type="button" onClick={() => people.rejectMatch({ personId: person.personId })}>Reject identity</button>}
         <button type="button" className="link-btn" onClick={() => onShowEvidence(person.personId)}>{evidenceOpen ? 'hide evidence' : 'show evidence'}</button>
+        <button type="button" className="link-btn" onClick={() => setBriefOpen((open) => !open)}>{briefOpen ? 'hide what she knows' : 'what she knows'}</button>
         <button type="button" onClick={async () => {
           const preview = people.previewDeletePerson(person.personId);
           // eslint-disable-next-line no-alert
@@ -815,6 +859,8 @@ function VoicePersonRow({ person, people, voiceIdentity, voice, faceIdentity, ca
         </div>
       ))}
       {profiles.some((profile) => profile.status === 'active') && <div className="suggestion-actions"><button type="button" className="link-btn" onClick={() => voiceIdentity.revokeConsent(person.personId).catch(() => {})}>Revoke voice consent</button></div>}
+
+      {briefOpen && <PersonBrief brief={brief} />}
 
       {evidenceOpen && evidence && (
         <ul className="diagnostic-trace">

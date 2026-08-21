@@ -340,3 +340,20 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
   resize: vertical;
 }
 .ingest-textarea:focus { outline: 2px solid var(--accent, #5b8def); outline-offset: -1px; }
+
+/* What Roma knows about a person — open items first. */
+.person-brief {
+  margin: 0.5rem 0 0.7rem;
+  padding: 0.7rem 0.85rem;
+  background: var(--panel-2, rgba(255, 255, 255, 0.02));
+  border-left: 2px solid var(--accent, #5b8def);
+  border-radius: 0 6px 6px 0;
+}
+.brief-heading {
+  margin: 0.35rem 0 0.2rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted, #9aa0aa);
+}
+.person-brief .diagnostic-trace { margin: 0 0 0.35rem; }

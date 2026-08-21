@@ -202,6 +202,19 @@ export function createAgentRuntime({
 
   // ── new pipeline ─────────────────────────────────────────────────────────────
 
+  /**
+   * Who is in the room, as far as Roma can tell: whoever the camera has
+   * settled on, plus the current speaker if identity resolved them. The
+   * speaker comes first — they are the person actually talking to you.
+   */
+  function briefsForPresentPeople({ sceneInfo, currentSpeaker }) {
+    if (!identity?.briefFor) return [];
+    const seen = faceObservationsFromScene(sceneInfo?.state).map((observation) => observation.personId);
+    const ids = [currentSpeaker?.personId, ...seen].filter(Boolean);
+    if (!ids.length) return [];
+    return identity.briefsForPresent(ids);
+  }
+
   function currentSceneInfo(at) {
     const state = sceneStore?.getState?.() ?? null;
     return {
@@ -303,6 +316,11 @@ export function createAgentRuntime({
       // visual snapshot. It can never reach the Speech Gate or TTS directly.
       currentSpeaker,
       relevantRelationships: currentSpeaker?.relationships ?? [],
+      // What Roma already knows about whoever she can see or hear right now
+      // (src/identity/brief.js). Straight reads from her own records — no
+      // model call, no inference — so it costs nothing to have ready the
+      // moment a face resolves.
+      personBriefs: briefsForPresentPeople({ sceneInfo, currentSpeaker }),
       // Who is wearing the glasses (src/agent/wearer.js) — resolved in code
       // from identity evidence or close-mic dominance, never guessed by the
       // model. Everything the model concludes about "who was spoken to"
